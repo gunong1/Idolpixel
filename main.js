@@ -1,3 +1,4 @@
+console.log("main.js loaded successfully!");
 const canvas = document.getElementById('pixelCanvas');
 const ctx = canvas.getContext('2d');
 // Side Panel Elements
