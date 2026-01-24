@@ -125,8 +125,10 @@ socket.on('pixel_update', (pixel) => {
 let lastMouseX, lastMouseY;
 
 canvas.onmousedown = (e) => {
-    // If Ctrl key is pressed, start selection drag
+    // If Ctrl key is pressed, start panning the canvas
     if (e.ctrlKey) {
+        isDraggingCanvas = true;
+    } else { // Normal left-click, start selection drag
         isSelectingPixels = true;
         const worldX = (e.clientX - offsetX) / scale;
         const worldY = (e.clientY - offsetY) / scale;
@@ -136,8 +138,6 @@ canvas.onmousedown = (e) => {
         selectionEndY = selectionStartY;
         selectedPixels = []; // Clear previous selection
         sidePanel.style.display = 'none'; // Hide panel during selection
-    } else {
-        isDraggingCanvas = true;
     }
     lastMouseX = e.clientX;
     lastMouseY = e.clientY;
