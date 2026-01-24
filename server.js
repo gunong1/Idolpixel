@@ -34,9 +34,16 @@ io.on('connection', (socket) => {
 
   socket.on('new_pixel', (data) => {
     try {
-      const stmt = db.prepare(`INSERT INTO pixels (x, y, color, owner) VALUES (?, ?, ?, ?)`);
-      const info = stmt.run(data.x, data.y, data.color, data.owner);
-      io.emit('pixel_update', { id: info.lastInsertRowid, x: data.x, y: data.y, color: data.color, owner: data.owner });
+      const stmt = db.prepare(`INSERT INTO pixels (x, y, color, idol_group_name, owner_nickname) VALUES (?, ?, ?, ?, ?)`);
+      const info = stmt.run(data.x, data.y, data.color, data.idol_group_name, data.owner_nickname);
+      io.emit('pixel_update', { 
+        id: info.lastInsertRowid, 
+        x: data.x, 
+        y: data.y, 
+        color: data.color, 
+        idol_group_name: data.idol_group_name, 
+        owner_nickname: data.owner_nickname 
+      });
     } catch (err) {
       console.log(err.message);
     }

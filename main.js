@@ -2,22 +2,39 @@ alert("main.js loaded");
 
 const canvas = document.getElementById('pixelCanvas');
 const ctx = canvas.getContext('2d');
+// Side Panel Elements
 const sidePanel = document.getElementById('side-panel');
 const areaIdText = document.getElementById('area-id');
+const pixelInfo = document.getElementById('pixel-info');
+const statusTag = document.getElementById('status-tag');
+const ownerNickname = document.getElementById('owner-nickname');
+const idolGroup = document.getElementById('idol-group');
+const purchaseForm = document.getElementById('purchase-form');
+const nicknameInput = document.getElementById('nickname-input');
+const idolSelect = document.getElementById('idol-select');
+const subscribeButton = document.getElementById('subscribe-button');
 
 const socket = io();
 
-// 1000만 픽셀 설정 (약 3162 x 3162)
 const WORLD_SIZE = 3162;
-const GRID_SIZE = 20; // 구독 단위 블록 크기
+const GRID_SIZE = 20;
 let scale = 0.2;
 let offsetX = window.innerWidth / 2 - (WORLD_SIZE * scale) / 2;
 let offsetY = window.innerHeight / 2 - (WORLD_SIZE * scale) / 2;
 
 let pixels = [];
+let selectedPixel = null;
+
+// --- Idol Group Info ---
+const idolInfo = {
+    'BTS': { color: 'rgba(123, 63, 242, 0.7)', initials: 'BTS' },
+    'Blackpink': { color: 'rgba(255, 105, 180, 0.7)', initials: 'BP' },
+    'TWICE': { color: 'rgba(255, 209, 0, 0.7)', initials: 'TW' },
+    'NewJeans': { color: 'rgba(50, 205, 50, 0.7)', initials: 'NJ' }
+};
 
 function draw() {
-    console.log('draw function called');
+    // console.log('draw function called');
     canvas.width = window.innerWidth;
     canvas.height = window.innerHeight;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -26,11 +43,11 @@ function draw() {
     ctx.translate(offsetX, offsetY);
     ctx.scale(scale, scale);
 
-    // 배경
+    // Background
     ctx.fillStyle = '#0a0f19';
     ctx.fillRect(0, 0, WORLD_SIZE, WORLD_SIZE);
 
-    // 그리드 (확대 시)
+    // Grid (only when zoomed in)
     if (scale > 1.5) {
         ctx.beginPath();
         ctx.strokeStyle = 'rgba(0, 212, 255, 0.1)';
@@ -41,40 +58,53 @@ function draw() {
         ctx.stroke();
     }
 
-    // Draw all pixels
+    // Draw all owned pixels
     pixels.forEach(pixel => {
-        ctx.fillStyle = pixel.color;
+        const groupInfo = idolInfo[pixel.idol_group_name] || { color: pixel.color, initials: '?' };
+        ctx.fillStyle = groupInfo.color;
         ctx.fillRect(pixel.x, pixel.y, GRID_SIZE, GRID_SIZE);
-        ctx.strokeStyle = '#00d4ff';
-        ctx.strokeRect(pixel.x, pixel.y, GRID_SIZE, GRID_SIZE);
+        
+        // Draw initials if zoomed in enough
+        if (scale > 3) {
+            ctx.fillStyle = 'white';
+            ctx.font = `bold ${GRID_SIZE / 2}px sans-serif`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(groupInfo.initials, pixel.x + GRID_SIZE / 2, pixel.y + GRID_SIZE / 2);
+        }
     });
 
     ctx.restore();
     updateMinimap();
 }
 
-// Fetch initial pixels
+// --- Data Fetching and Socket Events ---
+
 fetch('/api/pixels')
     .then(response => {
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-        }
+        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
         return response.json();
     })
     .then(initialPixels => {
-        console.log('Fetched initial pixels:', initialPixels);
+        // console.log('Fetched initial pixels:', initialPixels);
         pixels = initialPixels;
         draw();
     })
-    .catch(e => {
-        console.error('Error fetching initial pixels:', e);
-    });
+    .catch(e => console.error('Error fetching initial pixels:', e));
 
 socket.on('pixel_update', (pixel) => {
-    pixels.push(pixel);
+    // Check if pixel already exists and update it, otherwise add it.
+    const index = pixels.findIndex(p => p.x === pixel.x && p.y === pixel.y);
+    if (index > -1) {
+        pixels[index] = pixel;
+    } else {
+        pixels.push(pixel);
+    }
     draw();
 });
 
+
+// --- User Interactions ---
 
 let isDragging = false;
 let lastX, lastY;
@@ -87,32 +117,78 @@ window.onmousemove = (e) => {
     lastX = e.clientX; lastY = e.clientY;
     draw();
 };
+
 window.onmouseup = (e) => {
     if (isDragging) {
         isDragging = false;
         return;
     }
-
+    
     const worldX = (e.clientX - offsetX) / scale;
     const worldY = (e.clientY - offsetY) / scale;
 
     if (worldX >= 0 && worldX < WORLD_SIZE && worldY >= 0 && worldY < WORLD_SIZE) {
         const gx = Math.floor(worldX / GRID_SIZE);
         const gy = Math.floor(worldY / GRID_SIZE);
-        areaIdText.innerText = `Area #${gx}-${gy}`;
+        const clickedX = gx * GRID_SIZE;
+        const clickedY = gy * GRID_SIZE;
+
+        selectedPixel = { x: clickedX, y: clickedY };
+        const existingPixel = pixels.find(p => p.x === clickedX && p.y === clickedY);
+        
+        updateSidePanel(existingPixel);
         sidePanel.style.display = 'block';
-
-        // Simulate buying a pixel
-        socket.emit('new_pixel', {
-            x: gx * GRID_SIZE,
-            y: gy * GRID_SIZE,
-            color: 'rgba(255, 0, 0, 0.5)',
-            owner: 'New User'
-        });
-
     } else {
         sidePanel.style.display = 'none';
+        selectedPixel = null;
     }
+};
+
+function updateSidePanel(pixel) {
+    const gx = selectedPixel.x / GRID_SIZE;
+    const gy = selectedPixel.y / GRID_SIZE;
+    areaIdText.innerText = `Area #${gx}-${gy}`;
+
+    if (pixel) { // Pixel is owned
+        pixelInfo.style.display = 'block';
+        purchaseForm.style.display = 'none';
+        statusTag.textContent = '소유자 있음';
+        statusTag.style.background = '#ff4d4d';
+        ownerNickname.textContent = pixel.owner_nickname;
+        idolGroup.textContent = pixel.idol_group_name;
+    } else { // Pixel is available
+        pixelInfo.style.display = 'none';
+        purchaseForm.style.display = 'block';
+        statusTag.textContent = '구독 가능';
+        statusTag.style.background = '#00d4ff';
+    }
+}
+
+subscribeButton.onclick = () => {
+    const nickname = nicknameInput.value.trim();
+    const idolGroupName = idolSelect.value;
+
+    if (!nickname) {
+        alert('닉네임을 입력해주세요.');
+        return;
+    }
+    if (!selectedPixel) {
+        alert('선택된 픽셀이 없습니다.');
+        return;
+    }
+
+    const groupInfo = idolInfo[idolGroupName];
+
+    socket.emit('new_pixel', {
+        x: selectedPixel.x,
+        y: selectedPixel.y,
+        color: groupInfo.color,
+        idol_group_name: idolGroupName,
+        owner_nickname: nickname
+    });
+
+    sidePanel.style.display = 'none';
+    nicknameInput.value = '';
 };
 
 canvas.onwheel = (e) => {
@@ -120,11 +196,11 @@ canvas.onwheel = (e) => {
     const delta = e.deltaY > 0 ? 0.9 : 1.1;
     const mouseX = e.clientX - offsetX;
     const mouseY = e.clientY - offsetY;
-
+    
     offsetX -= (mouseX * delta - mouseX);
     offsetY -= (mouseY * delta - mouseY);
     scale *= delta;
-    scale = Math.min(Math.max(scale, 0.05), 15);
+    scale = Math.min(Math.max(scale, 0.05), 20);
     draw();
 };
 
