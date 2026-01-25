@@ -170,6 +170,22 @@ socket.on('pixel_update', (pixel) => {
 let lastMouseX, lastMouseY;
 
 canvas.onmousedown = (e) => {
+    const canvasRect = canvas.getBoundingClientRect();
+    const clientX = e.clientX;
+    const clientY = e.clientY;
+
+    const relativeX = Math.max(0, Math.min(clientX - canvasRect.left, canvas.width));
+    const relativeY = Math.max(0, Math.min(clientY - canvasRect.top, canvas.height));
+
+    let worldX = (relativeX - offsetX) / scale;
+    let worldY = (relativeY - offsetY) / scale;
+
+    worldX = Math.max(0, Math.min(worldX, WORLD_SIZE));
+    worldY = Math.max(0, Math.min(worldY, WORLD_SIZE));
+    
+    // Apply Math.floor to snap to integer world coordinate as per Request 3
+    worldX = Math.floor(worldX);
+    worldY = Math.floor(worldY);
 
     // If Ctrl key is pressed, start panning the canvas
     if (e.ctrlKey) {
@@ -178,10 +194,6 @@ canvas.onmousedown = (e) => {
     } else { // Normal left-click, start selection drag
         isSelectingPixels = true;
         isDraggingCanvas = false; // Ensure dragging mode is off
-        const clampedClientX = Math.max(0, Math.min(e.clientX, canvas.width));
-        const clampedClientY = Math.max(0, Math.min(e.clientY, canvas.height));
-        const worldX = (clampedClientX - offsetX) / scale;
-        const worldY = (clampedClientY - offsetY) / scale;
         selectionStartX = Math.floor(worldX / GRID_SIZE) * GRID_SIZE;
         selectionStartY = Math.floor(worldY / GRID_SIZE) * GRID_SIZE;
 
@@ -209,10 +221,23 @@ window.onmousemove = (e) => {
         lastMouseY = e.clientY;
         draw();
     } else if (isSelectingPixels) {
-        const clampedClientX = Math.max(0, Math.min(e.clientX, canvas.width));
-        const clampedClientY = Math.max(0, Math.min(e.clientY, canvas.height));
-        const worldX = (clampedClientX - offsetX) / scale;
-        const worldY = (clampedClientY - offsetY) / scale;
+        const canvasRect = canvas.getBoundingClientRect();
+        const clientX = e.clientX;
+        const clientY = e.clientY;
+
+        const relativeX = Math.max(0, Math.min(clientX - canvasRect.left, canvas.width));
+        const relativeY = Math.max(0, Math.min(clientY - canvasRect.top, canvas.height));
+
+        let worldX = (relativeX - offsetX) / scale;
+        let worldY = (relativeY - offsetY) / scale;
+
+        worldX = Math.max(0, Math.min(worldX, WORLD_SIZE));
+        worldY = Math.max(0, Math.min(worldY, WORLD_SIZE));
+
+        // Apply Math.floor to snap to integer world coordinate as per Request 3
+        worldX = Math.floor(worldX);
+        worldY = Math.floor(worldY);
+        
         selectionEndX = Math.floor(worldX / GRID_SIZE) * GRID_SIZE;
         selectionEndY = Math.floor(worldY / GRID_SIZE) * GRID_SIZE;
 
@@ -242,10 +267,22 @@ window.onmouseup = (e) => {
     if (isSelectingPixels) { // Finished selecting
         isSelectingPixels = false;
         
-        const clampedClientX = Math.max(0, Math.min(e.clientX, canvas.width));
-        const clampedClientY = Math.max(0, Math.min(e.clientY, canvas.height));
-        const currentMouseWorldX = (clampedClientX - offsetX) / scale;
-        const currentMouseWorldY = (clampedClientY - offsetY) / scale;
+        const canvasRect = canvas.getBoundingClientRect();
+        const clientX = e.clientX;
+        const clientY = e.clientY;
+
+        const relativeX = Math.max(0, Math.min(clientX - canvasRect.left, canvas.width));
+        const relativeY = Math.max(0, Math.min(clientY - canvasRect.top, canvas.height));
+
+        let currentMouseWorldX = (relativeX - offsetX) / scale;
+        let currentMouseWorldY = (relativeY - offsetY) / scale;
+
+        currentMouseWorldX = Math.max(0, Math.min(currentMouseWorldX, WORLD_SIZE));
+        currentMouseWorldY = Math.max(0, Math.min(currentMouseWorldY, WORLD_SIZE));
+
+        // Apply Math.floor to snap to integer world coordinate as per Request 3
+        currentMouseWorldX = Math.floor(currentMouseWorldX);
+        currentMouseWorldY = Math.floor(currentMouseWorldY);
 
         // Calculate the GRID_SIZE-aligned start coordinate of the pixel where the mouse was released
         let mouseUpPixelStartX = Math.floor(currentMouseWorldX / GRID_SIZE) * GRID_SIZE;
