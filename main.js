@@ -109,6 +109,10 @@ function draw() {
         });
 
         // Draw the bounding box
+        debugLog(`--- DEBUG in draw() for bounding box ---`);
+        debugLog(`Bounding Box (minX,minY): (${minX},${minY})`);
+        debugLog(`Bounding Box (maxX,maxY): (${maxX},${maxY})`);
+        debugLog(`Bounding Box (width,height): (${maxX - minX},${maxY - minY})`);
         ctx.strokeStyle = 'yellow';
         ctx.lineWidth = 2; // Fixed to 2 for consistent visibility
         ctx.strokeRect(minX, minY, maxX - minX, maxY - minY);
@@ -255,6 +259,13 @@ window.onmouseup = (e) => {
         debugLog(`Selected Pixels Count: ${selectedPixels.length}`);
         if (selectedPixels.length > 0) {
             debugLog(`First selected pixel: X:${selectedPixels[0].x}, Y:${selectedPixels[0].y}`);
+        }
+
+        debugLog(`--- DEBUG before draw() in onmouseup ---`);
+        debugLog(`Final selectedPixels.length: ${selectedPixels.length}`);
+        if (selectedPixels.length > 0) {
+            debugLog(`First selected pixel (x,y): (${selectedPixels[0].x}, ${selectedPixels[0].y})`);
+            debugLog(`Last selected pixel (x,y): (${selectedPixels[selectedPixels.length - 1].x}, ${selectedPixels[selectedPixels.length - 1].y})`);
         }
 
         updateSidePanel(); // Update panel based on selectedPixels
