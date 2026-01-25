@@ -21,6 +21,7 @@ const socket = io();
 
 const WORLD_SIZE = 3162;
 const GRID_SIZE = 20;
+const MAX_GRID_START_COORD = Math.floor((WORLD_SIZE - 1) / GRID_SIZE) * GRID_SIZE;
 let scale = 0.2;
 let offsetX = window.innerWidth / 2 - (WORLD_SIZE * scale) / 2;
 let offsetY = window.innerHeight / 2 - (WORLD_SIZE * scale) / 2;
@@ -197,13 +198,13 @@ canvas.onmousedown = (e) => {
         selectionStartX = Math.floor(worldX / GRID_SIZE) * GRID_SIZE;
         selectionStartY = Math.floor(worldY / GRID_SIZE) * GRID_SIZE;
 
-        // 클램핑: 캔버스 경계를 벗어나지 않도록 (0 이상, WORLD_SIZE 미만으로)
-        selectionStartX = Math.max(0, Math.min(selectionStartX, WORLD_SIZE - GRID_SIZE));
-        selectionStartY = Math.max(0, Math.min(selectionStartY, WORLD_SIZE - GRID_SIZE));
+        // 클램핑: 캔버스 경계를 벗어나지 않도록 (0 이상, MAX_GRID_START_COORD로)
+        selectionStartX = Math.max(0, Math.min(selectionStartX, MAX_GRID_START_COORD));
+        selectionStartY = Math.max(0, Math.min(selectionStartY, MAX_GRID_START_COORD));
 
-        // Add clamping
-        selectionStartX = Math.max(0, Math.min(selectionStartX, WORLD_SIZE - GRID_SIZE));
-        selectionStartY = Math.max(0, Math.min(selectionStartY, WORLD_SIZE - GRID_SIZE));
+        // Add clamping (This is redundant after the above line, but keeping for consistency if original code had a duplicate reason)
+        selectionStartX = Math.max(0, Math.min(selectionStartX, MAX_GRID_START_COORD));
+        selectionStartY = Math.max(0, Math.min(selectionStartY, MAX_GRID_START_COORD));
         selectionEndX = selectionStartX; // Initialize end with start
         selectionEndY = selectionStartY;
         selectedPixels = []; // Clear previous selection
@@ -242,8 +243,8 @@ window.onmousemove = (e) => {
         selectionEndY = Math.floor(worldY / GRID_SIZE) * GRID_SIZE;
 
         // 클램핑: 캔버스 경계를 벗어나지 않도록
-        selectionEndX = Math.max(0, Math.min(selectionEndX, WORLD_SIZE - GRID_SIZE));
-        selectionEndY = Math.max(0, Math.min(selectionEndY, WORLD_SIZE - GRID_SIZE));
+        selectionEndX = Math.max(0, Math.min(selectionEndX, MAX_GRID_START_COORD));
+        selectionEndY = Math.max(0, Math.min(selectionEndY, MAX_GRID_START_COORD));
         draw();
     }
 };
@@ -289,8 +290,8 @@ window.onmouseup = (e) => {
         let mouseUpPixelStartY = Math.floor(currentMouseWorldY / GRID_SIZE) * GRID_SIZE;
 
         // 클램핑: 캔버스 경계를 벗어나지 않도록
-        mouseUpPixelStartX = Math.max(0, Math.min(mouseUpPixelStartX, WORLD_SIZE - GRID_SIZE));
-        mouseUpPixelStartY = Math.max(0, Math.min(mouseUpPixelStartY, WORLD_SIZE - GRID_SIZE));
+        mouseUpPixelStartX = Math.max(0, Math.min(mouseUpPixelStartX, MAX_GRID_START_COORD));
+        mouseUpPixelStartY = Math.max(0, Math.min(mouseUpPixelStartY, MAX_GRID_START_COORD));
 
         // Determine the overall start (min) and end (max) pixel start coordinates of the selection rectangle
         const normalizedStartX = Math.min(selectionStartX, mouseUpPixelStartX);
