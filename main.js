@@ -274,6 +274,7 @@ window.onmouseup = (e) => {
     if (isSelectingPixels) { // Finished selecting
         isSelectingPixels = false;
         
+        
         const canvasRect = canvas.getBoundingClientRect();
         const clientX = e.clientX;
         const clientY = e.clientY;
@@ -315,25 +316,24 @@ window.onmouseup = (e) => {
 
         // If a valid rectangle was drawn (more than a single pixel)
         if (effectiveRectEndX > normalizedStartX && effectiveRectEndY > normalizedStartY) {
-            for (let x = normalizedStartX; x < effectiveRectEndX; x += GRID_SIZE) {
-                for (let y = normalizedStartY; y < effectiveRectEndY; y += GRID_SIZE) {
+            for (let y = normalizedStartY; y < effectiveRectEndY; y += GRID_SIZE) { // iterate in GRID_SIZE steps
+                for (let x = normalizedStartX; x < effectiveRectEndX; x += GRID_SIZE) { // iterate in GRID_SIZE steps
                     rawSelectionCandidates.push({ x, y });
                 }
             }
         } else { // Handle single click or very small drag as a single pixel selection
-             const worldX = (e.clientX - offsetX) / scale; // Recalculate based on current mouse pos for click
-             const worldY = (e.clientY - offsetY) / scale;
-             // Here we use the already defined currentMouseWorldX/Y after clamping and floor
-             const gx = Math.floor(currentMouseWorldX / GRID_SIZE) * GRID_SIZE;
-             const gy = Math.floor(currentMouseWorldY / GRID_SIZE) * GRID_SIZE;
-             rawSelectionCandidates.push({ x: gx, y: gy });
+            // Use currentMouseWorldX/Y (already clamped to WORLD_SIZE and floored)
+            const gx = Math.floor(currentMouseWorldX / GRID_SIZE) * GRID_SIZE;
+            const gy = Math.floor(currentMouseWorldY / GRID_SIZE) * GRID_SIZE;
+            rawSelectionCandidates.push({ x: gx, y: gy });
         }
         
-        // Filter rawSelectionCandidates to get final selected data within WORLD_SIZE
+        // Filter rawSelectionCandidates to get final selected data within WORLD_SIZE - EPSILON
         selectedPixels = rawSelectionCandidates.filter(p => 
             p.x >= 0 && p.x < WORLD_SIZE - EPSILON && 
             p.y >= 0 && p.y < WORLD_SIZE - EPSILON
         );
+
         
 
 
