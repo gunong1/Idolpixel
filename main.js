@@ -86,9 +86,26 @@ function draw() {
     if (isSelectingPixels && selectionStartX !== selectionEndX && selectionStartY !== selectionEndY) {
         ctx.strokeStyle = 'lime';
         ctx.lineWidth = 2 / scale;
-        ctx.strokeRect(selectionStartX, selectionStartY, selectionEndX - selectionStartX, selectionEndY - selectionStartY);
-        ctx.fillStyle = 'rgba(0, 255, 0, 0.1)';
-        ctx.fillRect(selectionStartX, selectionStartY, selectionEndX - selectionStartX, selectionEndY - selectionStartY);
+
+        // Calculate half the line width in world coordinates
+        const halfStroke = (ctx.lineWidth / 2);
+
+        // Adjust the drawing rectangle to be strictly within WORLD_SIZE
+        // Apply Math.max(0, ...) for start to prevent negative values
+        // Apply Math.min(WORLD_SIZE, ...) for end to prevent exceeding WORLD_SIZE
+        const drawStartX = Math.max(0, selectionStartX + halfStroke);
+        const drawStartY = Math.max(0, selectionStartY + halfStroke);
+        const drawEndX = Math.min(WORLD_SIZE, selectionEndX - halfStroke);
+        const drawEndY = Math.min(WORLD_SIZE, selectionEndY - halfStroke);
+
+        const drawWidth = drawEndX - drawStartX;
+        const drawHeight = drawEndY - drawStartY;
+
+        if (drawWidth > 0 && drawHeight > 0) { // Only draw if valid dimensions
+            ctx.strokeRect(drawStartX, drawStartY, drawWidth, drawHeight);
+            ctx.fillStyle = 'rgba(0, 255, 0, 0.1)';
+            ctx.fillRect(drawStartX, drawStartY, drawWidth, drawHeight);
+        }
     }
     // Draw visual indicator for selected pixels (after selection is finalized)
     if (selectedPixels.length > 0) {
@@ -150,8 +167,10 @@ canvas.onmousedown = (e) => {
     } else { // Normal left-click, start selection drag
         isSelectingPixels = true;
         isDraggingCanvas = false; // Ensure dragging mode is off
-        const worldX = (e.clientX - offsetX) / scale;
-        const worldY = (e.clientY - offsetY) / scale;
+        const clampedClientX = Math.max(0, Math.min(e.clientX, canvas.width));
+        const clampedClientY = Math.max(0, Math.min(e.clientY, canvas.height));
+        const worldX = (clampedClientX - offsetX) / scale;
+        const worldY = (clampedClientY - offsetY) / scale;
         selectionStartX = Math.floor(worldX / GRID_SIZE) * GRID_SIZE;
         selectionStartY = Math.floor(worldY / GRID_SIZE) * GRID_SIZE;
 
@@ -179,8 +198,10 @@ window.onmousemove = (e) => {
         lastMouseY = e.clientY;
         draw();
     } else if (isSelectingPixels) {
-        const worldX = (e.clientX - offsetX) / scale;
-        const worldY = (e.clientY - offsetY) / scale;
+        const clampedClientX = Math.max(0, Math.min(e.clientX, canvas.width));
+        const clampedClientY = Math.max(0, Math.min(e.clientY, canvas.height));
+        const worldX = (clampedClientX - offsetX) / scale;
+        const worldY = (clampedClientY - offsetY) / scale;
         selectionEndX = Math.floor(worldX / GRID_SIZE) * GRID_SIZE;
         selectionEndY = Math.floor(worldY / GRID_SIZE) * GRID_SIZE;
 
@@ -210,8 +231,10 @@ window.onmouseup = (e) => {
     if (isSelectingPixels) { // Finished selecting
         isSelectingPixels = false;
         
-        const currentMouseWorldX = (e.clientX - offsetX) / scale;
-        const currentMouseWorldY = (e.clientY - offsetY) / scale;
+        const clampedClientX = Math.max(0, Math.min(e.clientX, canvas.width));
+        const clampedClientY = Math.max(0, Math.min(e.clientY, canvas.height));
+        const currentMouseWorldX = (clampedClientX - offsetX) / scale;
+        const currentMouseWorldY = (clampedClientY - offsetY) / scale;
 
         // Calculate the GRID_SIZE-aligned start coordinate of the pixel where the mouse was released
         let mouseUpPixelStartX = Math.floor(currentMouseWorldX / GRID_SIZE) * GRID_SIZE;
@@ -235,9 +258,8 @@ window.onmouseup = (e) => {
 
                 // So, if normalizedEndX is the start of the last pixel, the loop should go up to (but not including) normalizedEndX + GRID_SIZE.
 
-                const effectiveRectEndX = normalizedEndX + GRID_SIZE;
-
-                const effectiveRectEndY = normalizedEndY + GRID_SIZE;
+                const effectiveRectEndX = Math.min(WORLD_SIZE, normalizedEndX + GRID_SIZE);
+                const effectiveRectEndY = Math.min(WORLD_SIZE, normalizedEndY + GRID_SIZE);
 
         
 
