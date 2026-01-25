@@ -13,9 +13,7 @@ const nicknameInput = document.getElementById('nickname-input');
 const idolSelect = document.getElementById('idol-select');
 const subscribeButton = document.getElementById('subscribe-button');
 
-function debugLog(message) {
-    // No operation - debug logging is disabled
-}
+
 
 
 const socket = io();
