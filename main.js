@@ -154,6 +154,10 @@ canvas.onmousedown = (e) => {
         selectionStartX = Math.floor(worldX / GRID_SIZE) * GRID_SIZE;
         selectionStartY = Math.floor(worldY / GRID_SIZE) * GRID_SIZE;
 
+        // 클램핑: 캔버스 경계를 벗어나지 않도록
+        selectionStartX = Math.max(0, Math.min(selectionStartX, WORLD_SIZE));
+        selectionStartY = Math.max(0, Math.min(selectionStartY, WORLD_SIZE));
+
         // Add clamping
         selectionStartX = Math.max(0, Math.min(selectionStartX, WORLD_SIZE - GRID_SIZE));
         selectionStartY = Math.max(0, Math.min(selectionStartY, WORLD_SIZE - GRID_SIZE));
@@ -179,9 +183,9 @@ window.onmousemove = (e) => {
         selectionEndX = Math.floor(worldX / GRID_SIZE) * GRID_SIZE;
         selectionEndY = Math.floor(worldY / GRID_SIZE) * GRID_SIZE;
 
-        // Add clamping
-        selectionEndX = Math.max(0, Math.min(selectionEndX, WORLD_SIZE - GRID_SIZE));
-        selectionEndY = Math.max(0, Math.min(selectionEndY, WORLD_SIZE - GRID_SIZE));
+        // 클램핑: 캔버스 경계를 벗어나지 않도록
+        selectionEndX = Math.max(0, Math.min(selectionEndX, WORLD_SIZE));
+        selectionEndY = Math.max(0, Math.min(selectionEndY, WORLD_SIZE));
         draw();
     }
 };
@@ -211,6 +215,10 @@ window.onmouseup = (e) => {
         // Calculate the GRID_SIZE-aligned start coordinate of the pixel where the mouse was released
         const mouseUpPixelStartX = Math.floor(currentMouseWorldX / GRID_SIZE) * GRID_SIZE;
         const mouseUpPixelStartY = Math.floor(currentMouseWorldY / GRID_SIZE) * GRID_SIZE;
+
+        // 클램핑: 캔버스 경계를 벗어나지 않도록
+        mouseUpPixelStartX = Math.max(0, Math.min(mouseUpPixelStartX, WORLD_SIZE));
+        mouseUpPixelStartY = Math.max(0, Math.min(mouseUpPixelStartY, WORLD_SIZE));
 
         // Add clamping
         mouseUpPixelStartX = Math.max(0, Math.min(mouseUpPixelStartX, WORLD_SIZE - GRID_SIZE));
