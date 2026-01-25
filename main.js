@@ -338,6 +338,7 @@ function updateSidePanel(singleOwnedPixel = null) {
         sidePanel.style.display = 'none';
         areaIdText.innerText = `Area #??`; // Default state
         selectedPixelCountDiv.style.display = 'none';
+    }
 }
 
 
