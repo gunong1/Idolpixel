@@ -14,6 +14,34 @@ const nicknameInput = document.getElementById('nickname-input');
 const idolSelect = document.getElementById('idol-select');
 const subscribeButton = document.getElementById('subscribe-button');
 
+// Help Feature Elements
+const helpBtn = document.getElementById('help-btn');
+const helpModal = document.getElementById('help-modal');
+const closeHelpBtn = document.getElementById('close-help');
+
+// Function to toggle help modal
+function toggleHelpModal(show) {
+    if (helpModal) {
+        helpModal.style.display = show ? 'flex' : 'none';
+    }
+}
+
+// Event Listeners for Help Feature
+if (helpBtn) {
+    helpBtn.addEventListener('click', () => toggleHelpModal(true));
+}
+if (closeHelpBtn) {
+    closeHelpBtn.addEventListener('click', () => toggleHelpModal(false));
+}
+if (helpModal) {
+    helpModal.addEventListener('click', (e) => {
+        if (e.target === helpModal) {
+            toggleHelpModal(false);
+        }
+    });
+}
+
+
 // NEW: Elements for Owner Stats (Created dynamically if not present, or added here)
 let ownerStatsDiv = document.getElementById('owner-stats');
 if (!ownerStatsDiv) {
@@ -33,10 +61,22 @@ const GRID_SIZE = 20;
 const MAX_GRID_START_COORD = Math.floor((WORLD_SIZE - 1) / GRID_SIZE) * GRID_SIZE;
 const EPSILON = 0.001; 
 let scale = 0.2;
+let offsetX = 0;
+let offsetY = 0;
 
-// Initial view centered around (1500, 1500) where the initial pixels are
-let offsetX = window.innerWidth / 2 - 1500 * scale;
-let offsetY = window.innerHeight / 2 - 1500 * scale;
+// Refactored: Fit to screen logic
+function fitToScreen() {
+    const scaleX = window.innerWidth / WORLD_SIZE;
+    const scaleY = window.innerHeight / WORLD_SIZE;
+    scale = Math.min(scaleX, scaleY) * 0.9; // Scale down to 90% for padding
+    
+    // Center the world
+    offsetX = (window.innerWidth - WORLD_SIZE * scale) / 2;
+    offsetY = (window.innerHeight - WORLD_SIZE * scale) / 2;
+}
+
+// Initial view: Fit to screen
+fitToScreen();
 
 // OPTIMIZATION: Use Map for O(1) lookup
 // Key: "x,y", Value: Pixel Object
@@ -458,23 +498,38 @@ function updateSidePanel(singleOwnedPixel = null) {
             idolGroup.textContent = '-';
             areaIdText.innerText = `총 ${totalSelected}개의 소유된 픽셀`;
             
-            // FIX: Show info if exactly one owned pixel is selected, regardless of how it was selected
-            if (ownedInSelection.length === 1) {
-                const p = ownedInSelection[0];
-                ownerNickname.textContent = p.owner_nickname;
-                idolGroup.textContent = p.idol_group_name;
-                areaIdText.innerText = `Area #${p.x/GRID_SIZE}-${p.y/GRID_SIZE}`;
+            // Refactored: Display owner info if exactly one owner is found across all selected pixels
+            // 1. Get unique owners
+            const uniqueOwners = [...new Set(ownedInSelection.map(p => p.owner_nickname))];
+            
+            if (uniqueOwners.length === 1) {
+                const samplePixel = ownedInSelection[0];
+                ownerNickname.textContent = samplePixel.owner_nickname;
+                idolGroup.textContent = samplePixel.idol_group_name;
+                
+                // If only one pixel selected, show specific area ID, otherwise show 'Multi-Select'
+                if (ownedInSelection.length === 1) {
+                    areaIdText.innerText = `Area #${samplePixel.x/GRID_SIZE}-${samplePixel.y/GRID_SIZE}`;
+                } else {
+                    areaIdText.innerText = `영역 선택됨`;
+                }
 
                 // --- NEW: Calculate and Show Owner Stats ---
-                const ownerCount = userPixelCounts.get(p.owner_nickname) || 0;
-                // Calculate Market Share (Start with share of occupied world?)
-                const totalOccupied = pixelMap.size;
-                const marketShare = totalOccupied > 0 ? ((ownerCount / totalOccupied) * 100).toFixed(2) : 0;
+                const ownerCount = userPixelCounts.get(samplePixel.owner_nickname) || 0;
+                // Calculate Market Share (Percentage of TOTAL WORLD)
+                // Total grid cells = (WORLD_SIZE / GRID_SIZE) ^ 2
+                const totalWorldPixels = Math.pow(Math.floor(WORLD_SIZE / GRID_SIZE), 2);
+                const marketShare = ((ownerCount / totalWorldPixels) * 100).toFixed(4); // Show 4 decimal places for precision
                 
                 if (ownerStatsDiv) {
                     ownerStatsDiv.innerHTML = `<span>보유 정보</span> <span>${ownerCount.toLocaleString()}개 (${marketShare}%)</span>`;
                     ownerStatsDiv.style.display = 'flex';
                 }
+            } else if (uniqueOwners.length > 1) {
+                 // Multiple owners
+                 ownerNickname.textContent = '다수의 소유자';
+                 idolGroup.textContent = '혼합됨';
+                 areaIdText.innerText = `영역 선택됨`;
             }
         }
     } else { // No pixels selected
@@ -498,12 +553,15 @@ subscribeButton.onclick = () => {
         return;
     }
 
+    // FIX: Filter out pixels that are already owned (registered in pixelMap)
+    // This prevents purchasing already owned pixels in a mixed selection.
     const pixelsToSend = selectedPixels.filter(p => 
-        p.x >= 0 && p.x < WORLD_SIZE - EPSILON && p.y >= 0 && p.y < WORLD_SIZE - EPSILON
+        p.x >= 0 && p.x < WORLD_SIZE - EPSILON && p.y >= 0 && p.y < WORLD_SIZE - EPSILON &&
+        !pixelMap.has(`${p.x},${p.y}`)
     );
 
     if (pixelsToSend.length === 0) {
-        alert('유효한 픽셀이 선택되지 않았습니다. 캔버스 범위 내의 픽셀을 선택해주세요.');
+        alert('구매 가능한 픽셀이 없습니다. (모두 소유됨 혹은 범위 밖)');
         return;
     }
 
@@ -550,15 +608,13 @@ function updateMinimap() {
 window.addEventListener('keydown', (e) => {
     if (e.code === 'Space') {
         e.preventDefault();
-        const scaleX = window.innerWidth / WORLD_SIZE;
-        const scaleY = window.innerHeight / WORLD_SIZE;
-        scale = Math.min(scaleX, scaleY); 
-        
-        // Center the world
-        offsetX = (window.innerWidth - WORLD_SIZE * scale) / 2;
-        offsetY = (window.innerHeight - WORLD_SIZE * scale) / 2;
-        
+        fitToScreen();
         draw();
+    } else if (e.code === 'F1') {
+        e.preventDefault();
+        toggleHelpModal(true);
+    } else if (e.code === 'Escape') {
+        toggleHelpModal(false);
     }
 });
 

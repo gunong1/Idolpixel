@@ -33,7 +33,7 @@
         }
 
         /* 하단 상태바 */
-        #status-bar { position: absolute; bottom: 20px; left: 20px; display: flex; gap: 10px; }
+        #status-bar { position: absolute; bottom: 20px; left: 20px; display: flex; gap: 10px; z-index: 90; }
         .tag { background: rgba(255,255,255,0.1); padding: 5px 12px; border-radius: 20px; font-size: 12px; }
 
         #minimap-container { position: absolute; bottom: 20px; right: 20px; width: 180px; height: 180px; background: rgba(0,0,0,0.5); border: 1px solid #333; }
@@ -82,11 +82,26 @@
     </div>
 
     <div id="status-bar">
-        <div class="tag">전체 점유율: 12.4%</div>
-        <div class="tag">활성 구독 팬덤: 842개</div>
+        <div class="tag" id="help-btn" style="cursor: pointer; background: rgba(0, 212, 255, 0.2); color: #00d4ff; font-weight: bold;">[F1] 도움말</div>
     </div>
 
-
+    <!-- Help Modal -->
+    <div id="help-modal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 1000; align-items: center; justify-content: center;">
+        <div class="panel" style="width: 400px; max-width: 90%; position: relative;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                <h2 style="margin: 0; color: #00d4ff;">사용 방법</h2>
+                <span id="close-help" style="cursor: pointer; font-size: 24px; color: #aaa;">&times;</span>
+            </div>
+            <ul style="list-style: none; padding: 0; margin: 0; color: #ddd; font-size: 14px; line-height: 2;">
+                <li style="display: flex; justify-content: space-between;"><span>캔버스 확대/축소</span> <span style="color: #00d4ff;">마우스 휠</span></li>
+                <li style="display: flex; justify-content: space-between;"><span>캔버스 이동</span> <span style="color: #00d4ff;">Ctrl + 드래그</span></li>
+                <li style="display: flex; justify-content: space-between;"><span>화면 중앙 정렬</span> <span style="color: #00d4ff;">스페이스바</span></li>
+                <li style="display: flex; justify-content: space-between;"><span>픽셀 선택</span> <span style="color: #00d4ff;">마우스 클릭</span></li>
+                <li style="display: flex; justify-content: space-between;"><span>다중 픽셀 선택</span> <span style="color: #00d4ff;">마우스 드래그</span></li>
+                <li style="display: flex; justify-content: space-between; margin-top: 10px; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 10px;"><span>닫기</span> <span style="color: #00d4ff;">ESC</span></li>
+            </ul>
+        </div>
+    </div>
 
     <div id="minimap-container"><div id="minimap-view"></div></div>
 
@@ -95,4 +110,4 @@
     <script src="/socket.io/socket.io.js"></script>
     <script src="main.js"></script>
 </body>
-</html> 
+</html>
