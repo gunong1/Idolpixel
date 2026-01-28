@@ -5,6 +5,8 @@ const session = require('express-session');
 const passport = require('passport');
 const GoogleStrategy = require('passport-google-oauth20').Strategy;
 const app = express();
+// Trust Proxy for Render/Heroku (Required for OAuth https)
+app.set('trust proxy', 1);
 const http = require('http');
 const server = http.createServer(app);
 const { Server } = require("socket.io");
@@ -67,8 +69,10 @@ passport.serializeUser((user, done) => {
 passport.deserializeUser((id, done) => {
     try {
         const user = db.prepare('SELECT * FROM users WHERE id = ?').get(id);
+        console.log("Deserializing user ID:", id);
         done(null, user);
     } catch (err) {
+        console.error("Error deserializing user:", err);
         done(err, null);
     }
 });
