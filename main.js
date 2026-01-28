@@ -1244,29 +1244,37 @@ if (mobileModeBtn) {
     mobileModeBtn.addEventListener('touchstart', (e) => e.stopPropagation(), { passive: false });
 }
 
-// --- Touch Event Listeners ---
+// --- Touch Event Listeners (Enhanced for Long-Press Selection) ---
+let longPressTimer = null;
+let isLongPressMode = false;
+const LONG_PRESS_DURATION = 500; // ms
+
 canvas.addEventListener('touchstart', (e) => {
     e.preventDefault(); // Prevent scrolling
     if (e.touches.length === 1) {
         const touch = e.touches[0];
         lastTouchX = touch.clientX;
         lastTouchY = touch.clientY;
+        isDraggingCanvas = false;
+        isLongPressMode = false;
 
-        if (isMobileSelectMode) {
-            // Start Selection
-            // Use fake event to reuse mouse logic
+        // Start Long Press Timer
+        longPressTimer = setTimeout(() => {
+            isLongPressMode = true;
+            if (navigator.vibrate) navigator.vibrate(50); // Haptic feedback
+
+            // Start Selection Logic (Simulate mousedown)
             window.onmousedown({
                 clientX: touch.clientX,
                 clientY: touch.clientY,
                 target: canvas,
-                ctrlKey: false, // Force select mode logic
+                ctrlKey: false, // Force select mode
                 preventDefault: () => { }
             });
-        } else {
-            // Start Panning
-            isDraggingCanvas = true;
-        }
+        }, LONG_PRESS_DURATION);
+
     } else if (e.touches.length === 2) {
+        clearTimeout(longPressTimer); // Cancel long press on 2-finger interaction
         // Start Pinch Zoom
         const touch1 = e.touches[0];
         const touch2 = e.touches[1];
@@ -1276,12 +1284,20 @@ canvas.addEventListener('touchstart', (e) => {
 
 canvas.addEventListener('touchmove', throttle((e) => {
     e.preventDefault();
+
     if (e.touches.length === 1) {
         const touch = e.touches[0];
         const deltaX = touch.clientX - lastTouchX;
         const deltaY = touch.clientY - lastTouchY;
+        const moveDist = Math.hypot(deltaX, deltaY);
 
-        if (isMobileSelectMode) {
+        // If moved significantly before long press triggers, cancel it -> Pan Mode
+        if (!isLongPressMode && moveDist > 5) {
+            clearTimeout(longPressTimer);
+            isDraggingCanvas = true;
+        }
+
+        if (isLongPressMode) {
             // Handle Selection Drag
             if (isSelectingPixels) {
                 updateSelection(touch.clientX, touch.clientY);
@@ -1295,6 +1311,7 @@ canvas.addEventListener('touchmove', throttle((e) => {
         lastTouchX = touch.clientX;
         lastTouchY = touch.clientY;
     } else if (e.touches.length === 2) {
+        clearTimeout(longPressTimer);
         // Handle Pinch Zoom
         const touch1 = e.touches[0];
         const touch2 = e.touches[1];
@@ -1303,14 +1320,9 @@ canvas.addEventListener('touchmove', throttle((e) => {
         if (lastPinchDistance > 0) {
             const zoomSpeed = 0.005;
             const deltaZoom = (currentdist - lastPinchDistance) * zoomSpeed;
-
-            // Zoom towards center of pinch (approximate as screen center for simplicity, or calc midpoint)
-            // Simple center zoom:
             const zoomFactor = 1 + deltaZoom;
             const newScale = Math.max(0.01, Math.min(5, scale * zoomFactor));
 
-            // Adjust offset to zoom relative to center logic similar to wheel
-            // For now, simple zoom is better than buggy zoom
             const centerX = window.innerWidth / 2;
             const centerY = window.innerHeight / 2;
             const worldX = (centerX - offsetX) / scale;
@@ -1327,19 +1339,34 @@ canvas.addEventListener('touchmove', throttle((e) => {
 }, 16), { passive: false });
 
 canvas.addEventListener('touchend', (e) => {
-    // e.preventDefault(); // Don't prevent default here to allow clicks? No, use explicit logic.
+    e.preventDefault();
+    clearTimeout(longPressTimer); // Always clear timer
+
     if (e.touches.length < 2) {
-        lastPinchDistance = 0; // Reset pinch
+        lastPinchDistance = 0;
+    }
+
+    if (isLongPressMode) {
+        // End Long Press Selection
+        if (isSelectingPixels) {
+            const touch = e.changedTouches[0];
+            window.onmouseup({
+                clientX: touch.clientX,
+                clientY: touch.clientY,
+                target: canvas,
+                preventDefault: () => { }
+            });
+        }
+        isLongPressMode = false;
+        return;
     }
 
     if (isDraggingCanvas) {
         isDraggingCanvas = false;
-        // Was dragging, so do nothing else
         return;
     }
 
-    // If NOT dragging, treat as a Click/Select (Tap)
-    // Only if it was a single finger touch
+    // Tap Detection (No drag, No long press)
     if (e.changedTouches.length === 1) {
         const touch = e.changedTouches[0];
         window.onmouseup({
