@@ -18,36 +18,30 @@ db.pragma('journal_mode = WAL'); // Better concurrency
 db.prepare('CREATE INDEX IF NOT EXISTS idx_pixels_xy ON pixels(x, y)').run(); // Fast range queries
 // --- DATABASE MIGRATIONS ---
 try {
-    db.prepare("ALTER TABLE pixels ADD COLUMN purchased_at DATETIME DEFAULT CURRENT_TIMESTAMP").run();
-    db.prepare("ALTER TABLE pixels ADD COLUMN expires_at DATETIME").run();
-    console.log("Migrated DB: Added timestamp columns.");
+    console.log("[MIGRATION] Attempting to add columns...");
+    // FIX: Removed DEFAULT CURRENT_TIMESTAMP to avoid "non-constant default" error
+    db.prepare("ALTER TABLE pixels ADD COLUMN purchased_at DATETIME").run();
+    console.log("[MIGRATION] Added 'purchased_at'");
 } catch (e) {
-    // Columns likely exist
+    console.log("[MIGRATION] 'purchased_at' status: " + e.message);
+}
+try {
+    db.prepare("ALTER TABLE pixels ADD COLUMN expires_at DATETIME").run();
+    console.log("[MIGRATION] Added 'expires_at'");
+} catch (e) {
+    console.log("[MIGRATION] 'expires_at' status: " + e.message);
+}
+
+// Check Schema
+try {
+    const columns = db.pragma('table_info(pixels)');
+    console.log("[SCHEMA] Current columns:", columns.map(c => c.name).join(', '));
+} catch (e) {
+    console.error("[SCHEMA] Failed to read schema:", e);
 }
 
 // --- Middleware ---
 // ... (rest of middleware)
-
-// NEW: History API
-app.get('/api/history', (req, res) => {
-    if (!req.isAuthenticated()) {
-        return res.status(401).json({ message: 'Not authenticated' });
-    }
-    const nickname = req.user.nickname;
-    try {
-        const stmt = db.prepare(`
-            SELECT * FROM pixels 
-            WHERE owner_nickname = ? 
-            ORDER BY purchased_at DESC 
-            LIMIT 100
-        `);
-        const rows = stmt.all(nickname);
-        res.json(rows);
-    } catch (err) {
-        console.error("Error fetching history:", err);
-        res.status(500).send(err.message);
-    }
-});
 
 // ... (existing routes)
 
@@ -149,19 +143,55 @@ app.get('/api/me', (req, res) => {
 
 // API Routes
 
+// NEW: History API (Moved here to be after middleware)
+app.get('/api/history', (req, res) => {
+    if (!req.isAuthenticated()) { // Now safe
+        return res.status(401).json({ message: 'Not authenticated' });
+    }
+    const nickname = req.user.nickname;
+    try {
+        // Aggregated History (Group by Purchase Time within 1 second window)
+        // Note: We group by purchased_at which we set identical for batches.
+        const stmt = db.prepare(`
+            SELECT 
+                idol_group_name, 
+                purchased_at, 
+                expires_at, 
+                COUNT(*) as count 
+            FROM pixels 
+            WHERE owner_nickname = ? 
+            GROUP BY purchased_at, idol_group_name
+            ORDER BY purchased_at DESC 
+            LIMIT 20
+        `);
+        const rows = stmt.all(nickname);
+        console.log("[DEBUG] /api/history returns:", rows);
+        res.json(rows);
+    } catch (err) {
+        console.error("Error fetching history:", err);
+        res.status(500).send(err.message);
+    }
+});
+
 // NEW: Chunk Loading API
 app.get('/api/pixels/chunk', (req, res) => {
-    const { minX, minY, maxX, maxY } = req.query;
+    let { minX, minY, maxX, maxY } = req.query;
 
     // Validate inputs
-    if (!minX || !minY || !maxX || !maxY) {
+    if (minX === undefined || minY === undefined || maxX === undefined || maxY === undefined) {
         return res.status(400).json({ error: 'Missing bounds parameters (minX, minY, maxX, maxY)' });
     }
+
+    minX = Number(minX);
+    minY = Number(minY);
+    maxX = Number(maxX);
+    maxY = Number(maxY);
 
     try {
         // Optimized range query using INDEX
         const stmt = db.prepare('SELECT * FROM pixels WHERE x >= ? AND x < ? AND y >= ? AND y < ?');
         const rows = stmt.all(minX, maxX, minY, maxY);
+        // console.log(`[DEBUG] /api/pixels/chunk params: ${minX},${minY} to ${maxX},${maxY} -> Count: ${rows.length}`);
         res.json(rows);
     } catch (err) {
         console.error("Error fetching chunk:", err);
@@ -205,11 +235,24 @@ io.on('connection', (socket) => {
     socket.on('disconnect', () => {
         console.log('user disconnected');
     });
+    socket.onAny((event, ...args) => {
+        console.log(`[DEBUG] Incoming Event: ${event}`, args);
+    });
 
     socket.on('new_pixel', (data) => {
+        console.log('[DEBUG] Received new_pixel:', data);
         try {
-            const stmt = db.prepare(`INSERT INTO pixels (x, y, color, idol_group_name, owner_nickname, purchased_at, expires_at) VALUES (?, ?, ?, ?, ?, datetime('now'), datetime('now', '+7 days'))`);
-            const info = stmt.run(data.x, data.y, data.color, data.idol_group_name, data.owner_nickname);
+            // Use consistent timestamp for the entire batch to allow grouping in history
+            const now = new Date();
+            const nowStr = now.toISOString(); // UTC ISO String
+
+            const expiry = new Date(now);
+            expiry.setDate(expiry.getDate() + 30); // 30 Days Expiry
+            const expiryStr = expiry.toISOString(); // UTC ISO String
+
+            const stmt = db.prepare(`INSERT INTO pixels (x, y, color, idol_group_name, owner_nickname, purchased_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)`);
+            const info = stmt.run(data.x, data.y, data.color, data.idol_group_name, data.owner_nickname, nowStr, expiryStr);
+            console.log('[DEBUG] Insert Success, ID:', info.lastInsertRowid);
             io.emit('pixel_update', {
                 id: info.lastInsertRowid,
                 x: data.x,
@@ -219,7 +262,7 @@ io.on('connection', (socket) => {
                 owner_nickname: data.owner_nickname
             });
         } catch (err) {
-            console.log(err.message);
+            console.error('[DEBUG] INSERT ERROR:', err.message);
         }
     });
 
@@ -227,11 +270,19 @@ io.on('connection', (socket) => {
     socket.on('batch_new_pixels', (pixels) => {
         console.log(`[SERVER] Received batch_new_pixels event with ${pixels ? pixels.length : 'undefined'} pixels`);
         try {
-            const insert = db.prepare(`INSERT INTO pixels (x, y, color, idol_group_name, owner_nickname, purchased_at, expires_at) VALUES (?, ?, ?, ?, ?, datetime('now'), datetime('now', '+7 days'))`);
+            // Use consistent timestamp for the entire batch to allow grouping in history
+            const now = new Date();
+            const nowStr = now.toISOString(); // UTC ISO String
+
+            const expiry = new Date(now);
+            expiry.setDate(expiry.getDate() + 30); // 30 Days Expiry
+            const expiryStr = expiry.toISOString(); // UTC ISO String
+
+            const insert = db.prepare(`INSERT INTO pixels (x, y, color, idol_group_name, owner_nickname, purchased_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)`);
             const insertMany = db.transaction((pixels) => {
                 const updates = [];
                 for (const p of pixels) {
-                    const info = insert.run(p.x, p.y, p.color, p.idol_group_name, p.owner_nickname);
+                    const info = insert.run(p.x, p.y, p.color, p.idol_group_name, p.owner_nickname, nowStr, expiryStr);
                     updates.push({
                         id: info.lastInsertRowid,
                         x: p.x,
@@ -246,11 +297,12 @@ io.on('connection', (socket) => {
 
             if (pixels && pixels.length > 0) {
                 const updates = insertMany(pixels);
+                console.log('[DEBUG] Batch Insert Success, Count:', updates.length);
                 // Broadcast all updates in one message
                 io.emit('batch_pixel_update', updates);
             }
         } catch (err) {
-            console.error('Batch insert error:', err.message);
+            console.error('[DEBUG] BATCH INSERT ERROR:', err.message);
         }
     });
 

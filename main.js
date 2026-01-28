@@ -56,6 +56,36 @@ if (helpModal) {
 }
 
 
+
+// --- Notice Feature Logic ---
+const noticeBtn = document.getElementById('notice-btn');
+const noticeModal = document.getElementById('notice-modal');
+const closeNoticeBtn = document.getElementById('close-notice');
+const closeNoticeBtnFooter = document.getElementById('close-notice-btn');
+
+function toggleNoticeModal(show) {
+    if (noticeModal) {
+        noticeModal.style.display = show ? 'flex' : 'none';
+    }
+}
+
+if (noticeBtn) {
+    noticeBtn.addEventListener('click', () => toggleNoticeModal(true));
+}
+if (closeNoticeBtn) {
+    closeNoticeBtn.addEventListener('click', () => toggleNoticeModal(false));
+}
+if (closeNoticeBtnFooter) {
+    closeNoticeBtnFooter.addEventListener('click', () => toggleNoticeModal(false));
+}
+if (noticeModal) {
+    noticeModal.addEventListener('click', (e) => {
+        if (e.target === noticeModal) {
+            toggleNoticeModal(false);
+        }
+    });
+}
+
 // NEW: Elements for Owner Stats (Created dynamically if not present, or added here)
 let ownerStatsDiv = document.getElementById('owner-stats');
 if (!ownerStatsDiv) {
@@ -123,20 +153,22 @@ function fitToScreen() {
 // Key: "x,y", Value: Pixel Object
 let pixelMap = new Map();
 
-// OPTIMIZATION: Spatial Chunking
-// Divide world into chunks to avoid iterating 300k pixels every frame
+// --- OPTIMIZATION: Spatial Chunking with Offscreen Canvas Caching ---
 const CHUNK_SIZE = 1000;
 let pixelChunks = new Map(); // Key: "chunkX,chunkY", Value: Set<Pixel>
+let chunkImages = new Map(); // Key: "chunkX,chunkY", Value: OffscreenCanvas | HTMLCanvasElement
 
 class ChunkManager {
-    constructor() {
-        this.loadedChunks = new Set(); // "cx,cy"
+    constructor(chunkSize) {
+        this.chunkSize = chunkSize;
+        this.loadedChunks = new Set();
         this.pendingChunks = new Set();
-        this.chunkSize = CHUNK_SIZE;
+        this.requestQueue = [];
+        this.activeRequests = 0;
+        this.maxConcurrentRequests = 6; // Limit active requests to prevent ERR_INSUFFICIENT_RESOURCES
     }
 
     update(minX, minY, maxX, maxY) {
-        // Expand bounds slightly to preload
         const startCx = Math.floor(minX / this.chunkSize);
         const endCx = Math.ceil(maxX / this.chunkSize);
         const startCy = Math.floor(minY / this.chunkSize);
@@ -149,46 +181,127 @@ class ChunkManager {
         }
     }
 
-    async loadChunk(cx, cy) {
+    loadChunk(cx, cy) {
         const key = `${cx},${cy}`;
         if (this.loadedChunks.has(key) || this.pendingChunks.has(key)) return;
 
         this.pendingChunks.add(key);
         const minX = cx * this.chunkSize;
         const minY = cy * this.chunkSize;
-        // API expects exclusive upper bound usually? 
-        // SQL: x >= minX AND x < maxX
         const maxX = minX + this.chunkSize;
         const maxY = minY + this.chunkSize;
 
-        // Validation against WORLD_SIZE (optional but good)
         if (maxX < 0 || minX > WORLD_SIZE || maxY < 0 || minY > WORLD_SIZE) {
-            this.loadedChunks.add(key); // Mark empty space as loaded
+            this.loadedChunks.add(key);
             this.pendingChunks.delete(key);
             return;
         }
 
+        // Add to queue
+        this.requestQueue.push({ cx, cy, minX, minY, maxX, maxY, key });
+        this.processQueue();
+    }
+
+    async processQueue() {
+        if (this.activeRequests >= this.maxConcurrentRequests || this.requestQueue.length === 0) return;
+
+        while (this.activeRequests < this.maxConcurrentRequests && this.requestQueue.length > 0) {
+            const task = this.requestQueue.shift();
+            this.activeRequests++;
+
+            this.fetchChunk(task).finally(() => {
+                this.activeRequests--;
+                this.processQueue();
+            });
+        }
+    }
+
+    async fetchChunk({ cx, cy, minX, minY, maxX, maxY, key }) {
         try {
             const res = await fetch(`/api/pixels/chunk?minX=${minX}&minY=${minY}&maxX=${maxX}&maxY=${maxY}`);
             if (!res.ok) throw new Error(`Chunk ${key} fetch failed`);
             const pixels = await res.json();
+            // console.log(`[Chunk ${key}] Loaded ${pixels.length} pixels`);
 
-            pixels.forEach(p => updatePixelStore(p));
+            pixels.forEach(p => {
+                try {
+                    p.x = Number(p.x);
+                    p.y = Number(p.y);
+                    updatePixelStore(p, false);
+                } catch (err) {
+                    // console.error("Error processing pixel:", p, err);
+                }
+            });
+
             this.loadedChunks.add(key);
 
-            // Recalculate clusters if new data arrived (throttled)
-            requestClusterUpdate();
-            draw();
+            // Render to Offscreen Canvas Cache
+            try {
+                this.renderChunkToCache(cx, cy);
+            } catch (err) {
+                console.error("Error rendering chunk to cache:", key, err);
+            }
+
+            // Optional: progressive draw
+            // draw(); 
 
         } catch (e) {
             console.error("Chunk load error:", e);
-            // Don't add to loadedChunks so we retry
+            this.loadedChunks.delete(key); // Retry allowed
         } finally {
             this.pendingChunks.delete(key);
         }
     }
+
+    renderChunkToCache(cx, cy) {
+        const key = `${cx},${cy}`;
+        if (!pixelChunks.has(key)) return;
+
+        const pixels = pixelChunks.get(key);
+        if (pixels.size === 0 && chunkImages.has(key)) {
+            chunkImages.delete(key);
+            return;
+        }
+
+        let offCanvas = chunkImages.get(key);
+        if (!offCanvas) {
+            // Force standard Canvas for debugging compatibility
+            offCanvas = document.createElement('canvas');
+            offCanvas.width = this.chunkSize;
+            offCanvas.height = this.chunkSize;
+            chunkImages.set(key, offCanvas);
+        }
+
+        const offCtx = offCanvas.getContext('2d');
+        offCtx.clearRect(0, 0, this.chunkSize, this.chunkSize);
+
+        const chunkMinX = cx * this.chunkSize;
+        const chunkMinY = cy * this.chunkSize;
+
+        let drawnCount = 0;
+
+        pixels.forEach(p => {
+            if (p.x < chunkMinX || p.x >= chunkMinX + this.chunkSize ||
+                p.y < chunkMinY || p.y >= chunkMinY + this.chunkSize) {
+                return;
+            }
+
+            const localX = p.x - chunkMinX;
+            const localY = p.y - chunkMinY;
+
+            const groupInfo = idolInfo[p.idol_group_name] || { color: p.color || '#fff' };
+            offCtx.fillStyle = groupInfo.color;
+            offCtx.fillRect(localX, localY, GRID_SIZE, GRID_SIZE);
+            drawnCount++;
+        });
+        // console.log(`[Chunk ${key}] cached ${drawnCount} pixels`);
+    }
+
+    invalidateChunk(cx, cy) {
+        this.renderChunkToCache(cx, cy);
+    }
 }
-const chunkManager = new ChunkManager();
+const chunkManager = new ChunkManager(CHUNK_SIZE); // Ensure global instance uses correct chunk size
 
 
 function getChunkKey(x, y) {
@@ -205,19 +318,10 @@ function addPixelToChunk(pixel) {
     pixelChunks.get(key).add(pixel);
 }
 
-// NEW: Cache for User Pixel Counts
-// Key: nickname, Value: count
-// Key: nickname, Value: count
+// ... (User Caches)
 let userPixelCounts = new Map();
-
-// NEW: Cache for User-Group Pixel Counts (Specific Ownership)
-// Key: "nickname:groupName", Value: count
 let userGroupPixelCounts = new Map();
-
-// NEW: Clusters for Group Labels
 let clusters = [];
-
-// NEW: Idols Pixel Count for Ranking
 let idolPixelCounts = new Map();
 
 
@@ -324,127 +428,21 @@ const idolInfo = {
     'f(x)': { color: 'rgba(128, 128, 255, 0.9)', initials: 'f(x)' }, // Periwinkle
 };
 
-// --- Clustering Logic ---
-// --- Clustering Logic ---
-function recalculateClusters() {
-    clusters = [];
-    const pixelsByGroup = new Map();
 
-    // Group pixels by idol group
-    pixelMap.forEach(pixel => {
-        if (!pixel.idol_group_name) return;
-
-        if (!pixelsByGroup.has(pixel.idol_group_name)) {
-            pixelsByGroup.set(pixel.idol_group_name, []);
-        }
-        pixelsByGroup.get(pixel.idol_group_name).push(pixel);
-    });
-
-    // Find connected components for each group
-    pixelsByGroup.forEach((pixels, groupName) => {
-        const visited = new Set();
-        const pixelSet = new Set(pixels.map(p => `${p.x},${p.y}`));
-
-        pixels.forEach(pixel => {
-            const key = `${pixel.x},${pixel.y}`;
-            if (visited.has(key)) return;
-
-            // Start BFS
-            const queue = [pixel];
-            visited.add(key);
-            const component = [];
-
-            let minX = pixel.x, maxX = pixel.x;
-            let minY = pixel.y, maxY = pixel.y;
-
-            while (queue.length > 0) {
-                const current = queue.shift();
-                component.push(current);
-
-                minX = Math.min(minX, current.x);
-                maxX = Math.max(maxX, current.x);
-                minY = Math.min(minY, current.y);
-                maxY = Math.max(maxY, current.y);
-
-                // Check neighbors (Up, Down, Left, Right)
-                const neighbors = [
-                    { x: current.x + GRID_SIZE, y: current.y },
-                    { x: current.x - GRID_SIZE, y: current.y },
-                    { x: current.x, y: current.y + GRID_SIZE },
-                    { x: current.x, y: current.y - GRID_SIZE }
-                ];
-
-                neighbors.forEach(n => {
-                    const nKey = `${n.x},${n.y}`;
-                    if (pixelSet.has(nKey) && !visited.has(nKey)) {
-                        visited.add(nKey);
-                        // We push the actual pixel object if available, or just coordinate placeholder
-                        // Since we just need coordinates for bounds, the placeholder is okay, 
-                        // but to be safe for component list, we ideally want the pixel. 
-                        // But finding it in the array is O(N). 
-                        // For bounding box calc, we just used current.x/y.
-                        // So pushing the neighbor coordinate object is fine for BFS traversal queue.
-                        queue.push({ x: n.x, y: n.y });
-                    }
-                });
-            }
-
-            if (component.length >= 5) { // Ignore small clusters
-                clusters.push({
-                    name: groupName,
-                    minX: minX,
-                    minY: minY,
-                    maxX: maxX + GRID_SIZE,
-                    maxY: maxY + GRID_SIZE,
-                    centerX: (minX + maxX + GRID_SIZE) / 2,
-                    centerY: (minY + maxY + GRID_SIZE) / 2,
-                    width: (maxX + GRID_SIZE) - minX,
-                    height: (maxY + GRID_SIZE) - minY,
-                    size: component.length
-                });
-            }
-        });
-    });
-}
-
-// Initial view: Fit to screen call moved to after initialization
-
-
-
-// --- OPTIMIZATION: Render Loop & Throttling ---
-let lastClusterUpdateTime = 0;
-const CLUSTER_UPDATE_INTERVAL = 2000; // Recalculate clusters max once every 2 seconds
-let pendingClusterUpdate = false;
-
-function requestClusterUpdate() {
-    pendingClusterUpdate = true;
-}
-
+// --- Render Loop (Simplified) ---
 function gameLoop(timestamp) {
-    // 1. Handle Cluster Updates (Throttled)
-    // 1. Handle Cluster Updates (Throttled)
-    if (pendingClusterUpdate && (timestamp - lastClusterUpdateTime > CLUSTER_UPDATE_INTERVAL)) {
-        recalculateClusters();
-        // updateRankingBoard(); // No need to spam this, logic handles it separately
-        lastClusterUpdateTime = timestamp;
-        pendingClusterUpdate = false;
-        needsRedraw = true;
-    }
+    // Note: Cluster updates are now event-driven (socket), removed from here.
 
-    // 2. Handle Rendering
     if (needsRedraw) {
         _render();
         needsRedraw = false;
     }
-
     requestAnimationFrame(gameLoop);
 }
 
-// Start the loop
-// Start the loop
 requestAnimationFrame(gameLoop);
 
-// Initial view: Fit to screen
+// Initial Fit
 fitToScreen();
 
 function draw() {
@@ -462,33 +460,24 @@ function _render() {
     ctx.fillStyle = '#0a0f19';
     ctx.fillRect(0, 0, WORLD_SIZE, WORLD_SIZE);
 
-    // Apply a clipping path
-    ctx.beginPath();
-    ctx.rect(0, 0, WORLD_SIZE, WORLD_SIZE);
-    ctx.clip();
-
     // Calculate Visible Viewport
-    // We only want to draw things that are inside the screen + slight margin
-    const VIEWPORT_MARGIN = 100 / scale; // 100px margin
+    const VIEWPORT_MARGIN = 100 / scale;
     const minVisibleX = -offsetX / scale - VIEWPORT_MARGIN;
     const maxVisibleX = (canvas.width - offsetX) / scale + VIEWPORT_MARGIN;
     const minVisibleY = -offsetY / scale - VIEWPORT_MARGIN;
     const maxVisibleY = (canvas.height - offsetY) / scale + VIEWPORT_MARGIN;
 
-    // --- NEW: Trigger Dynamic Chunk Loading ---
+    // Trigger Loads
     chunkManager.update(minVisibleX, minVisibleY, maxVisibleX, maxVisibleY);
 
-    // Draw Grid (Limit to viewport)
-    if (scale > 0.05) { // Show grid earlier
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)'; // Slightly brighter
+    // Draw Grid (Limit to viewport, Fade out logic)
+    if (scale > 0.05) {
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
         ctx.lineWidth = 1 / scale;
-
-        // Grid Bounds aligned to GRID_SIZE
         const startX = Math.max(0, Math.floor(minVisibleX / GRID_SIZE) * GRID_SIZE);
         const startY = Math.max(0, Math.floor(minVisibleY / GRID_SIZE) * GRID_SIZE);
         const endX = Math.min(WORLD_SIZE, Math.ceil(maxVisibleX / GRID_SIZE) * GRID_SIZE);
         const endY = Math.min(WORLD_SIZE, Math.ceil(maxVisibleY / GRID_SIZE) * GRID_SIZE);
-
         ctx.beginPath();
         for (let x = startX; x <= endX; x += GRID_SIZE) {
             ctx.moveTo(x, startY);
@@ -501,102 +490,95 @@ function _render() {
         ctx.stroke();
     }
 
-    // Draw World Background (to distinguish from empty space)
-    // ctx.fillStyle = '#0f0f15'; // Already drawn background above
-
     // Draw World Border
     ctx.strokeStyle = '#333';
     ctx.lineWidth = 10 / scale;
     ctx.strokeRect(0, 0, WORLD_SIZE, WORLD_SIZE);
 
-    // Draw all owned pixels (Iterate Visible Chunks)
-    // FIX: Enforce minimum size to avoid sub-pixel gaps
-    const minRenderSize = 1.05 / scale;
-    const drawSize = Math.max(GRID_SIZE, minRenderSize);
-    const offset = (drawSize - GRID_SIZE) / 2;
-
-    // Determine Visible Chunks
+    // --- RENDER PIXELS VIA CACHED CHUNKS ---
+    // Instead of iterating pixels, we draw the cached chunk images
     const startChunkX = Math.floor(minVisibleX / CHUNK_SIZE);
     const endChunkX = Math.ceil(maxVisibleX / CHUNK_SIZE);
     const startChunkY = Math.floor(minVisibleY / CHUNK_SIZE);
     const endChunkY = Math.ceil(maxVisibleY / CHUNK_SIZE);
 
-    // Optimized Drawing Loop: Sort chunks or use simple fillRect for now
-    // Batching (ctx.rect path) caused freeze. Reverting to fillRect.
-    // Optimization: Cache fillStyle to avoid state changes
-    let lastColor = null;
+    // Disable image smoothing for crisp pixels
+    ctx.imageSmoothingEnabled = false;
 
     for (let cx = startChunkX; cx <= endChunkX; cx++) {
         for (let cy = startChunkY; cy <= endChunkY; cy++) {
-            const chunkKey = `${cx},${cy}`;
-            if (pixelChunks.has(chunkKey)) {
-                const chunkPixels = pixelChunks.get(chunkKey);
+            const key = `${cx},${cy}`;
 
-                // Convert Set to Array for iteration if needed, or forEach directly
-                chunkPixels.forEach(pixel => {
-                    // Double check (chunks are rough, viewport is precise)
-                    if (pixel.x < minVisibleX || pixel.x > maxVisibleX ||
-                        pixel.y < minVisibleY || pixel.y > maxVisibleY) return;
+            // DEBUG: Blue Border for LOADED chunks (Removed)
+            /* if (chunkManager.loadedChunks.has(key)) {
+               // ...
+            } */
 
-                    const groupInfo = idolInfo[pixel.idol_group_name] || { color: pixel.color, initials: '?' };
+            const chunkImg = chunkImages.get(key);
 
-                    if (lastColor !== groupInfo.color) {
-                        ctx.fillStyle = groupInfo.color;
-                        lastColor = groupInfo.color;
-                    }
+            if (chunkImg) {
+                // Determine render position of this chunk
+                const drawX = cx * CHUNK_SIZE;
+                const drawY = cy * CHUNK_SIZE;
 
-                    ctx.fillRect(pixel.x - offset, pixel.y - offset, drawSize, drawSize);
-                });
+                // Draw the cached image
+                ctx.drawImage(chunkImg, drawX, drawY);
+
+                // DEBUG: Draw Chunk Borders (Removed)
+                /* ctx.strokeStyle = 'rgba(255, 0, 0, 0.5)';
+                   // ...
+                */
             }
         }
     }
 
-    // --- NEW: Draw Group Labels (Optimized) ---
-    // Disable Shadows for Performance during heavy drawing (Scale < 0.2)
-    const useShadows = scale > 0.2;
-    if (useShadows) {
-        ctx.shadowColor = 'rgba(0,0,0,0.5)';
-        ctx.shadowBlur = 4;
-    } else {
+    // --- RENDER CLUSTER LABELS (LOD) ---
+    // Only render text if zoomed in enough (relaxed threshold)
+    if (true) { // Always try to render labels
+        const useShadows = scale > 0.3; // Stricter shadow threshold for performance
+        if (useShadows) {
+            ctx.shadowColor = 'rgba(0,0,0,0.5)';
+            ctx.shadowBlur = 4;
+        } else {
+            ctx.shadowColor = 'transparent';
+            ctx.shadowBlur = 0;
+        }
+
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+
+        clusters.forEach(cluster => {
+            // Strict Culling for Clusters
+            if (cluster.maxX < minVisibleX || cluster.minX > maxVisibleX ||
+                cluster.maxY < minVisibleY || cluster.minY > maxVisibleY) return;
+
+            let worldFontSize = Math.min(cluster.width, cluster.height) * 0.8; // Larger text
+
+            ctx.font = `bold ${worldFontSize}px "Pretendard", sans-serif`;
+            const textMetrics = ctx.measureText(cluster.name);
+            const maxWidth = cluster.width * 0.9;
+
+            if (textMetrics.width > maxWidth) {
+                const ratio = maxWidth / textMetrics.width;
+                worldFontSize *= ratio;
+            }
+
+            const screenFontSize = worldFontSize * scale;
+            if (screenFontSize > 1) { // Visible if at least 1px
+                // Re-set font if changed (minimized context switching in loop optimal but hard given dynamic sizes)
+                ctx.font = `bold ${worldFontSize}px "Pretendard", sans-serif`;
+
+                ctx.lineWidth = worldFontSize * 0.05;
+                ctx.strokeStyle = 'rgba(0,0,0,0.3)';
+                ctx.strokeText(cluster.name, cluster.x, cluster.y);
+                ctx.fillText(cluster.name, cluster.x, cluster.y);
+            }
+        });
+
         ctx.shadowColor = 'transparent';
         ctx.shadowBlur = 0;
     }
-
-    clusters.forEach(cluster => {
-        // Culling for clusters
-        if (cluster.maxX < minVisibleX || cluster.minX > maxVisibleX ||
-            cluster.maxY < minVisibleY || cluster.minY > maxVisibleY) return;
-
-        // Calculate screen size
-        let worldFontSize = Math.min(cluster.width, cluster.height) * 0.4;
-
-        ctx.font = `bold ${worldFontSize}px "Pretendard", sans-serif`;
-        const textMetrics = ctx.measureText(cluster.name);
-        const maxWidth = cluster.width * 0.75;
-
-        if (textMetrics.width > maxWidth) {
-            const ratio = maxWidth / textMetrics.width;
-            worldFontSize *= ratio;
-        }
-
-        const screenFontSize = worldFontSize * scale;
-
-        if (screenFontSize > 10) {
-            ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
-            ctx.font = `bold ${worldFontSize}px "Pretendard", sans-serif`;
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-
-            ctx.lineWidth = worldFontSize * 0.05;
-            ctx.strokeStyle = 'rgba(0,0,0,0.3)';
-            ctx.strokeText(cluster.name, cluster.centerX, cluster.centerY);
-            ctx.fillText(cluster.name, cluster.centerX, cluster.centerY);
-        }
-    });
-
-    // Reset shadow
-    ctx.shadowColor = 'transparent';
-    ctx.shadowBlur = 0;
 
 
     // Draw selection rectangle if currently selecting
@@ -658,7 +640,7 @@ function _render() {
 // --- Data Fetching and Socket Events ---
 
 // Helper: Centralize pixel updates
-function updatePixelStore(pixel) {
+function updatePixelStore(pixel, redraw = true) {
     const key = `${pixel.x},${pixel.y}`;
     const oldPixel = pixelMap.get(key);
 
@@ -681,15 +663,28 @@ function updatePixelStore(pixel) {
         }
 
         // Remove from old chunk (though coordinates shouldn't change, logic is safer)
-        const oldChunkKey = getChunkKey(oldPixel.x, oldPixel.y);
+        const oldChunkCoords = getChunkKey(oldPixel.x, oldPixel.y).split(',');
+        const oldChunkKey = `${oldChunkCoords[0]},${oldChunkCoords[1]}`;
+
         if (pixelChunks.has(oldChunkKey)) {
             pixelChunks.get(oldChunkKey).delete(oldPixel);
+            if (redraw) chunkManager.invalidateChunk(parseInt(oldChunkCoords[0]), parseInt(oldChunkCoords[1]));
         }
     }
 
     // Update Map and Chunk
     pixelMap.set(key, pixel);
     addPixelToChunk(pixel);
+
+    // Invalidate New Chunk
+    const newChunkKey = getChunkKey(pixel.x, pixel.y);
+    const [cx, cy] = newChunkKey.split(',').map(Number);
+    if (redraw) {
+        chunkManager.invalidateChunk(cx, cy);
+    }
+
+    // Request Cluster Update on any change
+    requestClusterUpdate();
 
     // Update New Owner Stats
     if (pixel.owner_nickname) {
@@ -707,6 +702,7 @@ function updatePixelStore(pixel) {
             const userGroupKey = `${newOwner}:${newGroup}`;
             const newUserGroupCount = userGroupPixelCounts.get(userGroupKey) || 0;
             userGroupPixelCounts.set(userGroupKey, newUserGroupCount + 1);
+            // console.log(`Stats updated for ${userGroupKey}: ${newUserGroupCount + 1}`);
         }
     }
 }
@@ -969,7 +965,10 @@ window.onmouseup = (e) => {
 
             selectedPixels = [];
             // OPTIMIZATION: O(1) lookup
-            const existingPixel = pixelMap.get(`${clickedX},${clickedY}`);
+            const key = `${clickedX},${clickedY}`;
+            const existingPixel = pixelMap.get(key);
+
+            // console.log(`[DEBUG] Clicked: ${key}, Exists: ${!!existingPixel}, Map Size: ${pixelMap.size}`); // Debug Log
 
             if (existingPixel) {
                 selectedPixels.push(existingPixel);
@@ -1470,6 +1469,11 @@ window.addEventListener('click', (e) => {
 });
 
 function fetchHistory() {
+    const historyList = document.getElementById('history-list');
+    if (!historyList) return;
+
+    historyList.innerHTML = '<tr><td colspan="4" style="text-align:center; padding: 20px;">로딩 중...</td></tr>';
+
     fetch('/api/history')
         .then(res => {
             if (res.status === 401) throw new Error('로그인이 필요합니다.');
@@ -1487,20 +1491,20 @@ function fetchHistory() {
                 const tr = document.createElement('tr');
                 tr.style.borderBottom = '1px solid rgba(255,255,255,0.05)';
 
-                // Format Dates
-                const purchased = item.purchased_at ? new Date(item.purchased_at).toLocaleString() : '-';
-                const expires = item.expires_at ? new Date(item.expires_at).toLocaleString() : '무제한';
+                // Format Dates (Simple YYYY-MM-DD HH:MM)
+                const dateOpts = { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' };
+                const purchased = item.purchased_at ? new Date(item.purchased_at).toLocaleString('ko-KR', dateOpts) : '-';
+                const expires = item.expires_at ? new Date(item.expires_at).toLocaleString('ko-KR', dateOpts) : '무제한';
 
-                // Highlight if expired (example logic)
                 const isExpired = item.expires_at && new Date(item.expires_at) < new Date();
                 const colorStyle = isExpired ? 'color: #ff4d4d;' : '';
 
                 tr.innerHTML = `
                     <td style="padding: 10px; font-size: 13px;">${purchased}</td>
                     <td style="padding: 10px;">
-                        <span style="color: ${idolInfo[item.idol_group_name]?.color || '#fff'}">${item.idol_group_name}</span>
+                         <span style="color: ${idolInfo[item.idol_group_name]?.color || '#fff'}; font-weight:bold;">${item.idol_group_name}</span>
                     </td>
-                    <td style="padding: 10px; font-family: monospace;">${item.x}, ${item.y}</td>
+                    <td style="padding: 10px; font-weight: bold; color: #00d4ff;">${item.count}개</td>
                     <td style="padding: 10px; font-size: 13px; ${colorStyle}">${expires}</td>
                 `;
                 historyList.appendChild(tr);
@@ -1510,6 +1514,109 @@ function fetchHistory() {
             console.error(err);
             historyList.innerHTML = `<tr><td colspan="4" style="text-align:center; padding: 20px; color: #ff6b6b;">${err.message}</td></tr>`;
         });
+}
+
+// --- Restored Logic: Stats & Clusters ---
+
+function recalculateStats() {
+    console.log("[Stats] Recalculating all stats...");
+    userPixelCounts.clear();
+    idolPixelCounts.clear();
+    userGroupPixelCounts.clear();
+
+    pixelMap.forEach(pixel => {
+        if (!pixel.owner_nickname) return;
+
+        const owner = pixel.owner_nickname;
+        const group = pixel.idol_group_name;
+
+        // User Count
+        userPixelCounts.set(owner, (userPixelCounts.get(owner) || 0) + 1);
+
+        if (group) {
+            // Group Count
+            idolPixelCounts.set(group, (idolPixelCounts.get(group) || 0) + 1);
+
+            // User-Group Count (Format: owner:group)
+            const userGroupKey = `${owner}:${group}`;
+            userGroupPixelCounts.set(userGroupKey, (userGroupPixelCounts.get(userGroupKey) || 0) + 1);
+        }
+    });
+    console.log(`[Stats] Recalculation complete. PixelMap size: ${pixelMap.size}, Unique Owners: ${userPixelCounts.size}`);
+}
+
+let clusterUpdateTimeout = null;
+function requestClusterUpdate() {
+    if (clusterUpdateTimeout) clearTimeout(clusterUpdateTimeout);
+    clusterUpdateTimeout = setTimeout(() => {
+        recalculateClusters();
+        draw();
+    }, 500); // Debounce 500ms
+}
+
+function recalculateClusters() {
+    // Simple clustering: Merge adjacent pixels of same group
+    // For visualization labels
+    clusters = [];
+    const visited = new Set();
+
+    pixelMap.forEach(pixel => {
+        const key = `${pixel.x},${pixel.y}`;
+        if (visited.has(key) || !pixel.idol_group_name) return;
+
+        const groupName = pixel.idol_group_name;
+        const clusterPixels = [];
+        const queue = [pixel];
+        visited.add(key);
+
+        let minX = pixel.x, maxX = pixel.x, minY = pixel.y, maxY = pixel.y;
+
+        while (queue.length > 0) {
+            const p = queue.shift();
+            clusterPixels.push(p);
+
+            minX = Math.min(minX, p.x);
+            maxX = Math.max(maxX, p.x);
+            minY = Math.min(minY, p.y);
+            maxY = Math.max(maxY, p.y);
+
+            // Check neighbors (4-connectivity)
+            const neighbors = [
+                { x: p.x + GRID_SIZE, y: p.y },
+                { x: p.x - GRID_SIZE, y: p.y },
+                { x: p.x, y: p.y + GRID_SIZE },
+                { x: p.x, y: p.y - GRID_SIZE }
+            ];
+
+            neighbors.forEach(n => {
+                const nKey = `${n.x},${n.y}`;
+                if (!visited.has(nKey) && pixelMap.has(nKey)) {
+                    const neighborPixel = pixelMap.get(nKey);
+                    if (neighborPixel.idol_group_name === groupName) {
+                        visited.add(nKey);
+                        queue.push(neighborPixel);
+                    }
+                }
+            });
+        }
+
+        // Only label significant clusters
+        if (clusterPixels.length >= 1) { // Changed from 5 to 1 to show all groups
+            clusters.push({
+                name: groupName,
+                x: (minX + maxX) / 2,
+                y: (minY + maxY) / 2,
+                count: clusterPixels.length,
+                width: maxX - minX + GRID_SIZE,
+                height: maxY - minY + GRID_SIZE,
+                minX: minX, // Ensure these are saved for culling
+                minY: minY,
+                maxX: maxX + GRID_SIZE,
+                maxY: maxY + GRID_SIZE
+            });
+        }
+    });
+    // console.log(`[Clusters] Calculated ${clusters.length} clusters`);
 }
 
 // --- NEW: Ranking Board (Server-side) ---
@@ -1554,3 +1661,33 @@ function updateRankingBoard() {
         })
         .catch(err => console.error("Error updating ranking:", err));
 }
+
+// --- Initialization Calls ---
+updateRankingBoard();
+setInterval(updateRankingBoard, 5000); // Refresh ranking every 5 seconds
+
+// Ensure initial view is set
+fitToScreen();
+
+// Trigger initial cluster calculation after a short delay to allow chunks to load
+// Smart Initialization: Wait for chunks to load before calculating stats
+function checkAndRecalculate() {
+    if (chunkManager.requestQueue.length > 0 || chunkManager.activeRequests > 0) {
+        console.log(`[Loading] Queue: ${chunkManager.requestQueue.length}, Active: ${chunkManager.activeRequests}. Waiting...`);
+        setTimeout(checkAndRecalculate, 500); // Check again in 500ms
+        return;
+    }
+
+    // Safety delay to ensure final fetches processed
+    setTimeout(() => {
+        recalculateStats();
+        recalculateClusters();
+        draw();
+        console.log(`[Init] Stats & Clusters Updated. PixelMap Size: ${pixelMap.size}`);
+    }, 500);
+}
+
+// Start the check after a brief initial pause
+setTimeout(checkAndRecalculate, 1000);
+
+console.log("Main.js fully loaded and initialized.");

@@ -16,8 +16,17 @@
             <a href="/auth/logout" class="glass-btn small-btn">로그아웃</a>
         </div>
         <a id="login-btn" href="/auth/google">
-            <img src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA0OCA0OCI+PHBhdGggZmlsbD0iI0ZGQzEwNyIgZD0iTTQzLjYxMSAyMC4wODNIMjVWNDJoMzcuMjA1YzAuMDc2LjA1OC40My4zLjA2Ny41LTIuNDI4IDguMjkxIDUuMjA2IDguMjkxIDUuMjA2IDhWNDE5SDQzLjYxMXoiLz48cGF0aCBmaWxsPSIjRkYzRDMzIiBkPSJNMzIuMTg1IDMwLjk1Yy0zLjQxMi0yLjU5NS01Ljg0LTEuNjU5LTUuODQtMTIuNDc2aDI2Ljk0N0M1MC45OTMgMjIuNjk5IDQ3LjczNyAzMy41IDM3Ljk3IDQxLjM0IDM0LjAyIDQ0LjUgMjcuMTIgNDYgMTkuODQgNDZjLTkuMDY4IDAtMTYuNzI3LTQuNzEyLTIwLjkxMy0xMS45NzN6Ii8+PHBhdGggZmlsbD0iIzRCAFQwNSIgZD0iTTE5Ljg0IDIyYzIuNjg2IDAgNS4wODYuOTc1IDYuOTc2IDIuNjQxbDMuNDEyLTIuNTk1YzMuODY4IDIuNjM3IDYuMTYxIDcuMjU3IDYuMTYxIDEyLjQzIDAgMy4zOC0uODEzIDUuNzcyLTIuMDI5IDguMjkxQzMwLjIzNSAyNi45MDcgMjUuMzQ2IDMxIDE5Ljg0IDMxIDguNzM0IDMxIDAgMjIuNjk5IDAgMTIuNDc2IDAgNi43MDcgMy4wNTYgMS40NDIgOC4wNzEuMDAzTDEyLjA1NyA5LjU1MUM5LjQ4IDEwLjY5NiA3LjU4IDEzLjM1IDcuNTggMTYuMzR6Ii8+PHBhdGggZmlsbD0iIzRCAFQwNSIgZD0iTTEyLjA1NyA5LjU1MUMxNi4zNyAyLjAyIDE5Ljg0IDAgMjcuMTIgMGw1LjgyIDIuMjU4QzI3Ljk5NCAzLjg4MiAyNS42NzYgOC41MDcgMjEuMDkgMTEuOTdMMTIuMDU3IDkuNTUxeiIvPjwvc3ZnPg=="
-                alt="G" width="20" style="background:white; border-radius:50%; padding:2px;">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="20px" height="20px"
+                style="margin-right: 8px;">
+                <path fill="#FFC107"
+                    d="M43.611,20.083H42V20H24v8h11.303c-1.649,4.657-6.08,8-11.303,8c-6.627,0-12-5.373-12-12c0-6.627,5.373-12,12-12c3.059,0,5.842,1.154,7.961,3.039l5.657-5.657C34.046,6.053,29.268,4,24,4C12.955,4,4,12.955,4,24c0,11.045,8.955,20,20,20c11.045,0,20-8.955,20-20C44,22.659,43.862,21.35,43.611,20.083z" />
+                <path fill="#FF3D00"
+                    d="M6.306,14.691l6.571,4.819C14.655,15.108,18.961,12,24,12c3.059,0,5.842,1.154,7.961,3.039l5.657-5.657C34.046,6.053,29.268,4,24,4C16.318,4,9.656,8.337,6.306,14.691z" />
+                <path fill="#4CAF50"
+                    d="M24,44c5.166,0,9.86-1.977,13.409-5.192l-6.19-5.238C29.211,35.091,26.715,36,24,36c-5.202,0-9.619-3.317-11.283-7.946l-6.522,5.025C9.505,39.556,16.227,44,24,44z" />
+                <path fill="#1976D2"
+                    d="M43.611,20.083H42V20H24v8h11.303c-0.792,2.237-2.231,4.166-4.087,5.571c0.001-0.001,0.002-0.001,0.003-0.002l6.19,5.238C36.971,39.205,44,34,44,24C44,22.659,43.862,21.35,43.611,20.083z" />
+            </svg>
             <span>Google 로그인</span>
         </a>
     </nav>
@@ -53,7 +62,7 @@
 
         <div id="purchase-form">
             <hr>
-            <p>이 구역을 구독하여 당신의 아티스트를 위한 영토로 선포하세요.</p>
+            <p>이 픽셀을 구독하여 당신의 아티스트를 위한 영토로 선포하세요.</p>
             <div class="form-group">
                 <label for="nickname-input">닉네임</label>
                 <input type="text" id="nickname-input" placeholder="로그인이 필요합니다" disabled>
@@ -148,11 +157,14 @@
             <div class="payment-info">
                 <span>결제 금액:</span> <span>₩ 1,000</span>
             </div>
-            <button class="subscribe-btn" id="subscribe-button">구역 구독하기</button>
+            <button class="subscribe-btn" id="subscribe-button">픽셀 구독하기</button>
         </div>
     </div>
 
     <div id="status-bar">
+        <div class="tag" id="notice-btn" style="margin-right: 10px; cursor: pointer;">
+            📢 공지
+        </div>
         <div class="tag" id="help-btn">
             [F1] 도움말
         </div>
@@ -178,6 +190,35 @@
         </div>
     </div>
 
+    <!-- Notice Modal -->
+    <div id="notice-modal"
+        style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); justify-content: center; align-items: center; z-index: 2000;">
+        <div class="panel" style="max-width: 500px; width: 90%;">
+            <div class="help-modal-header"
+                style="border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 10px; margin-bottom: 15px; display: flex; justify-content: space-between; align-items: center;">
+                <h2 style="margin: 0; font-size: 20px;">📢 공지사항</h2>
+                <span id="close-notice" style="cursor: pointer; font-size: 24px;">&times;</span>
+            </div>
+            <div style="line-height: 1.6; color: #eee;">
+                <p style="font-weight: bold; color: #00d4ff; margin-bottom: 15px; font-size: 1.1em;">
+                    "가장 넓은 땅을 차지한 팬덤의 이름으로<br>기부금이 전달됩니다"
+                </p>
+                <p style="margin-bottom: 10px;">
+                    FANDOM PIXEL은 전 세계 팬덤이 함께 만드는<br>글로벌 기부 프로젝트입니다.
+                </p>
+                <ul style="list-style: disc; padding-left: 20px; font-size: 0.95em; color: #ccc;">
+                    <li>픽셀 구매 수익금의 일부는 기부금으로 적립됩니다.</li>
+                    <li>매 시즌 종료 시, 가장 많은 영토를 점령한<br>1위 팬덤의 명의로 기부가 진행됩니다.</li>
+                    <li>여러분의 팬덤을 빛내고 따뜻한 마음을 전하세요!</li>
+                </ul>
+            </div>
+            <div style="margin-top: 20px; text-align: right;">
+                <button id="close-notice-btn"
+                    style="background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); color: white; padding: 8px 16px; border-radius: 4px; cursor: pointer;">닫기</button>
+            </div>
+        </div>
+    </div>
+
     <div id="minimap-container">
         <div id="minimap-view"></div>
     </div>
@@ -199,7 +240,7 @@
                         <tr style="border-bottom: 1px solid rgba(255,255,255,0.2); text-align: left;">
                             <th style="padding: 10px;">구매일</th>
                             <th style="padding: 10px;">그룹</th>
-                            <th style="padding: 10px;">좌표</th>
+                            <th style="padding: 10px;">개수</th>
                             <th style="padding: 10px;">만료일</th>
                         </tr>
                     </thead>
