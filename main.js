@@ -1453,7 +1453,8 @@ function updateRankingBoard() {
             rankingList.innerHTML = '';
 
             // Calculate total for percentage
-            const totalPixels = rankingData.reduce((sum, item) => sum + item.count, 0);
+            // FIXED: Calculate total world pixels for percentage (Territory Control %)
+            const TOTAL_WORLD_CAPACITY = Math.pow(Math.floor(WORLD_SIZE / GRID_SIZE), 2);
 
             // Show Top 3 Only
             rankingData.slice(0, 3).forEach((item, index) => {
@@ -1461,7 +1462,7 @@ function updateRankingBoard() {
                 const groupInfo = idolInfo[item.name] || { color: '#ccc', initials: '?' };
 
                 // Percentage
-                const percentage = totalPixels > 0 ? ((item.count / totalPixels) * 100).toFixed(1) : 0;
+                const percentage = TOTAL_WORLD_CAPACITY > 0 ? ((item.count / TOTAL_WORLD_CAPACITY) * 100).toFixed(4) : 0;
                 const rankEmoji = ['🥇', '🥈', '🥉'][index] || `<span class="rank-num">${index + 1}</span>`;
 
                 li.style.cssText = "display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.05);";
