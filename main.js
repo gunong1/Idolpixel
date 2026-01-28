@@ -1327,18 +1327,21 @@ canvas.addEventListener('touchmove', throttle((e) => {
 }, 16), { passive: false });
 
 canvas.addEventListener('touchend', (e) => {
-    e.preventDefault();
+    // e.preventDefault(); // Don't prevent default here to allow clicks? No, use explicit logic.
     if (e.touches.length < 2) {
         lastPinchDistance = 0; // Reset pinch
     }
 
     if (isDraggingCanvas) {
         isDraggingCanvas = false;
+        // Was dragging, so do nothing else
+        return;
     }
 
-    if (isSelectingPixels) {
-        // End Selection
-        const touch = e.changedTouches[0]; // Use changedTouches for touchend
+    // If NOT dragging, treat as a Click/Select (Tap)
+    // Only if it was a single finger touch
+    if (e.changedTouches.length === 1) {
+        const touch = e.changedTouches[0];
         window.onmouseup({
             clientX: touch.clientX,
             clientY: touch.clientY,

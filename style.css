@@ -351,21 +351,26 @@ h1 {
     #ranking-board {
         top: 60px !important;
         left: 10px !important;
-        width: 160px !important;
-        padding: 10px !important;
+        width: 140px !important;
+        /* Smaller width */
+        padding: 8px !important;
     }
 
     #ranking-board h3 {
-        font-size: 12px;
-    }
-
-    #ranking-list {
         font-size: 11px;
     }
 
-    /* Mobile Controls */
+    #ranking-list {
+        font-size: 10px;
+    }
+
+    #ranking-list li {
+        padding: 4px 0 !important;
+    }
+
+    /* Mobile Controls - REMOVED as requested */
     #mobile-controls {
-        display: block !important;
+        display: none !important;
     }
 
     /* Side Panel -> Bottom Sheet */
@@ -386,11 +391,12 @@ h1 {
     }
 
     /* Adjust Minimap */
-    #minimap {
-        width: 100px !important;
-        height: 100px !important;
-        bottom: 90px !important;
-        /* Above controls */
+    #minimap-container {
+        width: 80px !important;
+        /* Smaller minimap on mobile */
+        height: 80px !important;
+        bottom: 20px !important;
+        /* Lower since controls are gone */
         right: 10px !important;
     }
 }
