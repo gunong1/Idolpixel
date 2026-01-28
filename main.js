@@ -78,6 +78,7 @@ let scale = 0.2;
 let offsetX = 0;
 let offsetY = 0;
 let isDrawing = false; // Throttling flag for draw()
+let needsRedraw = true; // Optimization flag
 
 // Refactored: Fit to screen logic
 // Refactored: Fit to screen logic
@@ -348,7 +349,6 @@ function recalculateClusters() {
 
 
 // --- OPTIMIZATION: Render Loop & Throttling ---
-let needsRedraw = true;
 let lastClusterUpdateTime = 0;
 const CLUSTER_UPDATE_INTERVAL = 2000; // Recalculate clusters max once every 2 seconds
 let pendingClusterUpdate = false;
