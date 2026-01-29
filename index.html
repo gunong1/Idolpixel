@@ -118,18 +118,64 @@
                 <h2 style="margin: 0; font-size: 20px;">📢 공지사항</h2>
                 <span id="close-notice" style="cursor: pointer; font-size: 24px;">&times;</span>
             </div>
-            <div style="line-height: 1.6; color: #eee;">
-                <p style="font-weight: bold; color: #00d4ff; margin-bottom: 15px; font-size: 1.1em;">
-                    "가장 넓은 땅을 차지한 팬덤의 이름으로<br>기부금이 전달됩니다"
-                </p>
-                <p style="margin-bottom: 10px;">
-                    FANDOM PIXEL은 전 세계 팬덤이 함께 만드는<br>글로벌 기부 프로젝트입니다.
-                </p>
-                <ul style="list-style: disc; padding-left: 20px; font-size: 0.95em; color: #ccc;">
-                    <li>픽셀 구매 수익금의 일부는 기부금으로 적립됩니다.</li>
-                    <li>매 시즌 종료 시, 가장 많은 영토를 점령한<br>1위 팬덤의 명의로 기부가 진행됩니다.</li>
-                    <li>여러분의 팬덤을 빛내고 따뜻한 마음을 전하세요!</li>
-                </ul>
+            <div style="line-height: 1.6; color: #eee; font-size: 14px; text-align: left;">
+
+                <!-- Tabs Navigation -->
+                <div
+                    style="display: flex; gap: 10px; margin-bottom: 20px; border-bottom: 1px solid rgba(255,255,255,0.1);">
+                    <button class="notice-tab active" data-target="tab-intro">프로젝트 안내</button>
+                    <button class="notice-tab" data-target="tab-process">기부 프로세스</button>
+                </div>
+
+                <!-- Tab 1: Intro -->
+                <div id="tab-intro" class="notice-content">
+                    <p
+                        style="font-weight: bold; color: #00d4ff; margin-bottom: 15px; font-size: 1.1em; text-align: center;">
+                        "가장 넓은 땅을 차지한 팬덤의 이름으로<br>기부금이 전달됩니다"
+                    </p>
+                    <p style="margin-bottom: 15px; text-align: center; color: #eee;">
+                        FANDOM PIXEL은 전 세계 팬덤이 함께 만드는<br>글로벌 기부 프로젝트입니다.
+                    </p>
+                    <ul style="list-style: disc; padding-left: 20px; font-size: 0.95em; color: #ccc; line-height: 1.8;">
+                        <li>픽셀 구매 수익금의 일부는 기부금으로 적립됩니다.</li>
+                        <li>매 시즌 종료 시, 가장 많은 영토를 점령한<br>1위 팬덤의 명의로 기부가 진행됩니다.</li>
+                        <li>여러분의 팬덤을 빛내고 따뜻한 마음을 전하세요!</li>
+                    </ul>
+                </div>
+
+                <!-- Tab 2: Process -->
+                <div id="tab-process" class="notice-content" style="display: none;">
+                    <h3 style="color: #00d4ff; margin: 0 0 15px 0; font-size: 16px;">📢 기부 진행 절차</h3>
+
+                    <div style="margin-bottom: 12px;">
+                        <strong style="color: #fff; display: block; margin-bottom: 4px;">1. 기부 주체</strong>
+                        <p style="margin: 0; color: #ccc; font-size: 13px;">매 시즌 종료 시점 점유율 1위 팬덤의 이름으로 기부됩니다.</p>
+                    </div>
+
+                    <div style="margin-bottom: 12px;">
+                        <strong style="color: #fff; display: block; margin-bottom: 4px;">2. 기부금 산정</strong>
+                        <p style="margin: 0; color: #ccc; font-size: 13px;">픽셀 구매 총액에서 결제 수수료를 제외한 수익금의 일정 비율이 기부금으로 자동
+                            적립됩니다.</p>
+                    </div>
+
+                    <div style="margin-bottom: 12px;">
+                        <strong style="color: #fff; display: block; margin-bottom: 4px;">3. 기부처</strong>
+                        <p style="margin: 0; color: #ccc; font-size: 13px;">공신력 있는 복지 재단을 통해 [위기 아동 지원/환경 보호] 등 매 시즌 선정된
+                            테마에 기부됩니다.</p>
+                    </div>
+
+                    <div style="margin-bottom: 12px;">
+                        <strong style="color: #fff; display: block; margin-bottom: 4px;">4. 결과 보고</strong>
+                        <p style="margin: 0; color: #ccc; font-size: 13px;">기부 완료 후 7일 이내에, 공식 SNS를 통해 기부 영수증과 증서를 투명하게
+                            공개합니다.</p>
+                    </div>
+
+                    <div style="margin-bottom: 12px;">
+                        <strong style="color: #fff; display: block; margin-bottom: 4px;">5. 아티스트 홍보</strong>
+                        <p style="margin: 0; color: #ccc; font-size: 13px;">1위 팬덤의 기부 소식은 공식 트위터(X) 및 보도자료를 통해 배포되어
+                            아티스트의 긍정적인 이미지를 전파합니다.</p>
+                    </div>
+                </div>
             </div>
             <div style="margin-top: 20px; text-align: right;">
                 <button id="close-notice-btn"
@@ -171,15 +217,40 @@
         </div>
     </div>
 
-    <script src="/socket.io/socket.io.js"></script>
-    <script src="https://cdn.portone.io/v2/browser-sdk.js"></script>
-    <script src="main.js?v=auth_fix"></script>
+    <!-- Share Modal (New) -->
+    <div id="share-modal" class="modal-overlay"
+        style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); justify-content: center; align-items: center; z-index: 3000;">
+        <div class="panel" style="max-width: 400px; width: 90%; text-align: center; position: relative;">
+            <h2 style="color: #00d4ff; margin-top: 0;">🎉 영토 확장 성공!</h2>
+            <p style="color: #ccc; font-size: 13px; margin-bottom: 20px;">아래 카드를 저장하여 팬덤을 자랑하세요!</p>
+
+            <div id="share-card-container"
+                style="margin-bottom: 20px; border-radius: 10px; overflow: hidden; box-shadow: 0 4px 15px rgba(0,0,0,0.5); background: #222;">
+                <!-- Image will be injected here -->
+                <img id="share-card-img" style="width: 100%; height: auto; display: block;" alt="Share Card">
+            </div>
+
+            <div style="display: flex; gap: 10px; justify-content: center;">
+                <button id="download-card-btn" class="subscribe-btn" style="flex: 1; font-size: 14px;">💾 이미지
+                    저장</button>
+                <button id="close-share-btn" class="glass-btn" style="flex: 1; font-size: 14px;">닫기</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Mobile Controls -->
     <div id="mobile-controls">
         <button id="mobile-mode-btn">
             이동
         </button>
     </div>
+    <!-- Activity Ticker -->
+    <div id="activity-ticker">
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="https://cdn.portone.io/v2/browser-sdk.js"></script>
+    <script src="main.js?v=ticker_fix"></script>
 </body>
 
 </html>

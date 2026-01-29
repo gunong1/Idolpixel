@@ -1274,6 +1274,19 @@ subscribeButton.onclick = async () => {
         selectedPixels = [];
         draw();
 
+        // Calculate Center of Selection for Zoom
+        let sumX = 0, sumY = 0;
+        pixelsToSend.forEach(p => { sumX += p.x; sumY += p.y; });
+        const centerX = sumX / pixelsToSend.length;
+        const centerY = sumY / pixelsToSend.length;
+
+        // Trigger Share Card
+        setTimeout(() => {
+            generateShareCard(idolGroupName, pixelsToSend.length, color, centerX, centerY);
+        }, 500); // Small delay to let canvas redraw
+
+        // Trigger Ticker: Removed Local Trigger to avoid double notifications (Socket handles it)
+
     } catch (error) {
         console.error('[PAYMENT] Error:', error);
         alert('결제 처리 중 도우미 오류가 발생했습니다.');
@@ -1487,6 +1500,236 @@ canvas.addEventListener('touchend', (e) => {
     }
 });
 
+
+
+
+// --- Share Card Feature ---
+// --- Share Card Feature ---
+// Move event binding to a safe check loop or function
+function setupShareHandlers() {
+    const closeShareBtn = document.getElementById('close-share-btn');
+    const downloadCardBtn = document.getElementById('download-card-btn');
+    const shareModal = document.getElementById('share-modal');
+    const shareCardImg = document.getElementById('share-card-img');
+
+    if (closeShareBtn && shareModal) {
+        closeShareBtn.addEventListener('click', () => {
+            shareModal.style.display = 'none';
+        });
+    }
+
+    if (downloadCardBtn && shareCardImg) {
+        downloadCardBtn.addEventListener('click', () => {
+            const link = document.createElement('a');
+            link.download = `idolpixel-share-${Date.now()}.png`;
+            link.href = shareCardImg.src;
+            link.click();
+        });
+    }
+}
+// Try to setup immediately, and also on load
+setupShareHandlers();
+window.addEventListener('DOMContentLoaded', setupShareHandlers);
+window.addEventListener('load', setupShareHandlers);
+
+function generateShareCard(idolName, pixelCount, color, centerX, centerY) {
+    console.log(`[ShareCard] Generating for ${idolName}, count: ${pixelCount} at ${centerX},${centerY}`);
+
+    // Dynamic Retrieval to prevent null errors
+    const shareModal = document.getElementById('share-modal');
+    const shareCardImg = document.getElementById('share-card-img');
+
+    if (!shareModal || !shareCardImg) {
+        console.error("[ShareCard] Modal elements not found in DOM!");
+        return;
+    }
+
+    const width = 600;
+    const height = 400;
+    const offCanvas = document.createElement('canvas');
+    offCanvas.width = width;
+    offCanvas.height = height;
+    const ctx = offCanvas.getContext('2d');
+
+    // 2. Draw Background
+    let baseColor = color || '#333';
+    ctx.fillStyle = '#1a1f2c';
+    ctx.fillRect(0, 0, width, height);
+
+    const gradient = ctx.createLinearGradient(0, 0, width, height);
+    gradient.addColorStop(0, baseColor);
+    gradient.addColorStop(1, '#000000');
+    ctx.globalAlpha = 0.3;
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, width, height);
+    ctx.globalAlpha = 1.0;
+
+    // 3. Draw Map Snapshot (Zoomed In)
+    const mapWidth = 560;
+    const mapHeight = 220; // Slightly shorter to make room for text
+    const mapX = 20;
+    const mapY = 100; // Moved down
+
+    ctx.save();
+    ctx.beginPath();
+
+    if (ctx.roundRect) {
+        ctx.roundRect(mapX, mapY, mapWidth, mapHeight, 10);
+    } else {
+        ctx.rect(mapX, mapY, mapWidth, mapHeight);
+    }
+
+    ctx.clip();
+
+    // Draw white background
+    ctx.fillStyle = '#0a0f19';
+    ctx.fillRect(mapX, mapY, mapWidth, mapHeight);
+
+    // --- ZOOM LOGIC ---
+    // If we have a target center, we want to capture that area from the canvas
+    if (centerX !== undefined && centerY !== undefined) {
+        // Convert World Coord -> Screen Coord
+        // currentOffset & scale are global
+        const screenX = (centerX * scale) + offsetX;
+        const screenY = (centerY * scale) + offsetY;
+
+        // Visual Zoom Factor (Digital Zoom on the screenshot)
+        // If we want 2x zoom relative to current view: source w/h should be 1/2 of dest w/h
+        // But we are drawing to `mapWidth` x `mapHeight`.
+        // Let's grab a source box from the canvas that corresponds to the target area.
+
+        // Dynamic Zoom: We want the purchased area to occupy a good chunk of the card.
+        // Let's say we want to show a 200x200 pixel area around the target (in screen pixels).
+        // But if the user is zoomed out, 200 screen pixels might be huge.
+        // Let's act like a magnifying glass: Capture a 300x150 box from screen around the center point.
+        // And draw it into the 560x220 box. This gives ~2x zoom.
+
+        const sourceW = mapWidth / 2.5; // Zoom Level (Smaller source = More Zoom)
+        const sourceH = mapHeight / 2.5;
+
+        const sourceX = screenX - (sourceW / 2);
+        const sourceY = screenY - (sourceH / 2);
+
+        // Draw clipped image
+        ctx.drawImage(canvas, sourceX, sourceY, sourceW, sourceH, mapX, mapY, mapWidth, mapHeight);
+
+        // Draw a marker at the center?
+        // ctx.strokeStyle = '#fff';
+        // ctx.strokeRect(mapX + mapWidth/2 - 10, mapY + mapHeight/2 - 10, 20, 20);
+
+    } else {
+        // Fallback: Default full canvas copy
+        ctx.drawImage(canvas, 0, 0, canvas.width, canvas.height, mapX, mapY, mapWidth, mapHeight);
+    }
+
+    // Inner Border
+    ctx.strokeStyle = 'rgba(255,255,255,0.2)';
+    ctx.lineWidth = 4;
+    ctx.strokeRect(mapX, mapY, mapWidth, mapHeight);
+    ctx.restore();
+
+    // 4. Text Overlay (Refined Layout)
+    ctx.textAlign = 'left';
+    ctx.fillStyle = '#ffffff';
+
+    // Line 1: Idol Name
+    ctx.font = 'bold 28px sans-serif';
+    ctx.fillStyle = baseColor; // Use idol color for name
+    ctx.fillText(`${idolName}`, 30, 50);
+    const nameWidth = ctx.measureText(`${idolName}`).width;
+
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText(`의 영토를`, 30 + nameWidth + 5, 50);
+
+    // Line 2: Count and Message
+    ctx.font = 'bold 36px sans-serif';
+    ctx.fillStyle = '#00d4ff'; // Blue highlight
+    ctx.fillText(`${pixelCount} Px`, 30, 88);
+    const countWidth = ctx.measureText(`${pixelCount} Px`).width;
+
+    ctx.font = 'bold 24px sans-serif';
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText(`만큼 더 넓혔습니다! 🚩`, 30 + countWidth + 10, 85);
+
+    // Footer
+    ctx.fillStyle = 'rgba(255,255,255,0.5)';
+    ctx.font = '14px sans-serif';
+    ctx.textAlign = 'right';
+    ctx.fillText('FANDOM PIXEL', width - 20, height - 15);
+
+    // 5. Output
+    shareCardImg.src = offCanvas.toDataURL('image/png');
+    shareModal.style.display = 'flex';
+}
+
+// --- Activity Ticker Logic ---
+function showTickerMessage(data) {
+    const activityTicker = document.getElementById('activity-ticker');
+    if (!activityTicker) {
+        console.error("[Ticker] Element #activity-ticker not found!");
+        return;
+    }
+
+    // Deduplicate or Aggregate? 
+    // For now, let's just show raw events but aggregated by batch manually if needed.
+    // The server emits 'batch_pixel_update' with an array of pixels.
+
+    // Group by User + Idol to create a summary message
+    const summary = {}; // Key: "User:Idol" -> Count
+
+    data.forEach(p => {
+        const key = `${p.owner_nickname}:${p.idol_group_name}`;
+        if (!summary[key]) summary[key] = 0;
+        summary[key]++;
+    });
+
+    Object.keys(summary).forEach(key => {
+        const [nickname, idolName] = key.split(':');
+        const count = summary[key];
+
+        const item = document.createElement('div');
+        item.className = 'ticker-item';
+        // item.innerHTML = `<span class="ticker-highlight">${nickname}</span>님이 <span class="ticker-highlight">${idolName}</span>의 ${count}픽셀을 점령했습니다!`;
+        item.innerHTML = `
+            <span class="ticker-icon">🚩</span>
+            <span>방금 <b>${nickname}</b>님이 <b>${idolName}</b>의 <span class="ticker-highlight">${count}픽셀</span>을 점령했습니다!</span>
+        `;
+
+        activityTicker.appendChild(item);
+
+        // Remove after animation (5s total: 0.4s slide + 4.1s wait + 0.5s fade)
+        setTimeout(() => {
+            if (item.parentNode) item.parentNode.removeChild(item);
+        }, 5000);
+    });
+}
+
+// Socket Listeners for Ticker
+socket.on('batch_pixel_update', (pixels) => {
+    console.log("[Ticker] Received batch update:", pixels.length);
+    if (pixels && pixels.length > 0) {
+        showTickerMessage(pixels);
+    }
+});
+
+// Also listen for singular updates (just in case legacy path is used)
+socket.on('pixel_update', (data) => {
+    console.log("[Ticker] Received single update:", data);
+    if (data) {
+        showTickerMessage([data]);
+    }
+});
+
+// Test Trigger on Load (Remove before production if annoying, but good for confirmation)
+/*
+setTimeout(() => {
+    showTickerMessage([{
+        owner_nickname: '시스템',
+        idol_group_name: 'Fandom Pixel',
+        count: 1
+    }]);
+}, 2000);
+*/
 
 
 
@@ -1739,3 +1982,18 @@ function checkAndRecalculate() {
 setTimeout(checkAndRecalculate, 1000);
 
 console.log("Main.js fully loaded and initialized.");
+
+// --- Notice Modal Tabs ---
+document.querySelectorAll('.notice-tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+        // Toggle Active Tab
+        document.querySelectorAll('.notice-tab').forEach(t => t.classList.remove('active'));
+        tab.classList.add('active');
+
+        // Toggle Content
+        const targetId = tab.dataset.target;
+        document.querySelectorAll('.notice-content').forEach(content => {
+            content.style.display = content.id === targetId ? 'block' : 'none';
+        });
+    });
+});

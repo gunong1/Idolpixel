@@ -454,3 +454,92 @@ h1 {
         transform: translateY(0);
     }
 }
+
+/* --- Activity Ticker --- */
+#activity-ticker {
+    position: fixed;
+    bottom: 80px;
+    /* Above Status Bar (which is at 20px) */
+    left: 20px;
+    /* transform: translateX(-50%); REMOVED Center Align */
+    z-index: 1000;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    pointer-events: none;
+    width: 300px;
+    align-items: flex-start;
+    /* Align Left */
+}
+
+.ticker-item {
+    background: rgba(10, 15, 25, 0.9);
+    /* Slightly darker */
+    backdrop-filter: blur(8px);
+    border: 1px solid rgba(0, 212, 255, 0.3);
+    padding: 10px 16px;
+    border-radius: 8px;
+    /* Less rounded for a more technical look? Or keep 20px */
+    border-radius: 20px;
+    font-size: 13px;
+    color: white;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5);
+    white-space: nowrap;
+    /* Slide in from Left instead of Up */
+    animation: tickerSlideRight 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275), fadeOut 0.5s ease-in 4.5s forwards;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+@keyframes tickerSlideRight {
+    from {
+        opacity: 0;
+        transform: translateX(-20px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateX(0);
+    }
+}
+
+@keyframes fadeOut {
+    to {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+}
+
+@media (max-width: 768px) {
+    #activity-ticker {
+        bottom: 80px;
+        /* Move up on mobile to avoid bottom sheet overlap */
+        width: 90%;
+    }
+}
+/* --- Notice Modal Tabs --- */
+.notice-tab {
+    background: none;
+    border: none;
+    color: #888;
+    padding: 10px 15px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: bold;
+    border-bottom: 2px solid transparent;
+    transition: all 0.3s;
+}
+
+.notice-tab:hover {
+    color: #ccc;
+}
+
+.notice-tab.active {
+    color: #00d4ff;
+    border-bottom: 2px solid #00d4ff;
+}
+
+.notice-content {
+    animation: fadeIn 0.3s ease-out;
+}
