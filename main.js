@@ -1458,8 +1458,15 @@ canvas.addEventListener('wheel', (e) => {
 }, { passive: false });
 
 function updateMinimap() {
+    const container = document.getElementById('minimap-container');
     const mv = document.getElementById('minimap-view');
-    const mmScale = 180 / WORLD_SIZE;
+    if (!container || !mv) return;
+
+    // Use actual container size (minus borders if needed, but offsetWidth is usually safe for this calc)
+    // Minimap is a square, so width is sufficient
+    const mmSize = container.offsetWidth;
+    const mmScale = mmSize / WORLD_SIZE;
+
     mv.style.width = (window.innerWidth / scale * mmScale) + 'px';
     mv.style.height = (window.innerHeight / scale * mmScale) + 'px';
     mv.style.left = (-offsetX / scale * mmScale) + 'px';
@@ -1508,11 +1515,21 @@ if (mobileModeBtn) {
 // --- Touch Event Listeners (Enhanced for Long-Press Selection) ---
 let longPressTimer = null;
 let isLongPressMode = false;
+let isMultiTouch = false; // Flag to prevent accidental clicks during pinch/zoom
 const LONG_PRESS_DURATION = 250; // ms (0.25s)
 
 canvas.addEventListener('touchstart', (e) => {
     e.preventDefault(); // Prevent scrolling
+
+    // Multi-touch Detection
+    if (e.touches.length > 1) {
+        isMultiTouch = true;
+    }
+
     if (e.touches.length === 1) {
+        // If coming from a multi-touch state, ignore this "single" touch start until reset
+        if (isMultiTouch) return;
+
         const touch = e.touches[0];
         lastTouchX = touch.clientX;
         lastTouchY = touch.clientY;
@@ -1526,6 +1543,7 @@ canvas.addEventListener('touchstart', (e) => {
 
         // Start Long Press Timer
         longPressTimer = setTimeout(() => {
+            if (isMultiTouch) return; // Verify again
             isLongPressMode = true;
             if (navigator.vibrate) navigator.vibrate(50); // Haptic feedback
 
@@ -1554,6 +1572,8 @@ canvas.addEventListener('touchmove', throttle((e) => {
     e.preventDefault();
 
     if (e.touches.length === 1) {
+        if (isMultiTouch) return; // Ignore movement if part of multi-touch gesture
+
         const touch = e.touches[0];
 
         // Sync mouse coordinates for autoPanLoop
@@ -1594,7 +1614,8 @@ canvas.addEventListener('touchmove', throttle((e) => {
             const zoomSpeed = 0.005;
             const deltaZoom = (currentdist - lastPinchDistance) * zoomSpeed;
             const zoomFactor = 1 + deltaZoom;
-            const newScale = Math.max(0.01, Math.min(5, scale * zoomFactor));
+            // Updated Scale Limit from 0.01 to 0.0005 to match Wheel Zoom
+            const newScale = Math.max(0.0005, Math.min(20, scale * zoomFactor));
 
             const centerX = window.innerWidth / 2;
             const centerY = window.innerHeight / 2;
@@ -1617,6 +1638,16 @@ canvas.addEventListener('touchend', (e) => {
 
     if (e.touches.length < 2) {
         lastPinchDistance = 0;
+    }
+
+    // MULTI-TOUCH EXIT GUARD
+    if (isMultiTouch) {
+        // If all fingers are lifted, reset the flag
+        if (e.touches.length === 0) {
+            isMultiTouch = false;
+        }
+        // CRITICAL: Return immediately to prevent 'tap' execution
+        return;
     }
 
     if (isLongPressMode) {
@@ -2184,7 +2215,7 @@ function updateRankingBoard() {
                     <div style="display: flex; align-items: center; gap: 8px;">
                         <span style="font-size: 16px; width: 20px; text-align: center;">${rankEmoji}</span>
                         <div>
-                            <div style="font-weight: bold; color: ${groupInfo.color}; text-shadow: 0 0 5px ${groupInfo.color}40;">${item.name}</div>
+                            <div style="font-weight: bold; color: #ffffff; text-shadow: 0 0 5px ${groupInfo.color}80;">${item.name}</div>
                             <div style="font-size: 11px; opacity: 0.7;">${item.count.toLocaleString()} px</div>
                         </div>
                     </div>

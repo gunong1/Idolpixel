@@ -66,3 +66,10 @@
   - [x] Add "Loading Pixels..." indicator.
   - [x] Force `draw()` after initial data load and `fitToScreen`.
   - [x] Ensure viewport calculation works without user input.
+- [x] **Performance Optimization**
+  - [x] Install `compression` middleware (Gzip).
+- [x] **Mobile UX Improvements**
+  - [x] Prevent pixel click/selection during multi-touch (pinch/zoom).
+  - [x] Increase maximum zoom-out range (lower minimum scale).
+- [x] **Fix: Minimap Indicator**
+  - [x] Use dynamic container size for minimap scale calculation.
