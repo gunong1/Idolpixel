@@ -5,6 +5,7 @@
 - [x] CSS: Responsive Layouts & Bottom Sheet <!-- id: 18 -->
 - [x] JS: Touch Events (Pan, Select, Pinch) <!-- id: 19 -->
 - [x] Verify on Mobile <!-- id: 20 -->
+- [x] **Fix**: Layout stacking for Season Timer and Notice (Web/Mobile).
 
 # Scalability & Performance ⭐️
 - [x] **Backend Chunking API**: Create `/api/chunks` or `/api/pixels?bounds=...` to load only visible area.
@@ -51,6 +52,8 @@
   - [x] Add Language Switcher to `index.html`.
   - [x] Implement text replacement logic in `main.js`.
   - [x] Apply localization to Share Card and Ticker.
+  - [x] **Fix**: Resolve broken keys (fallback logic & static file serving).
+  - [x] **Update**: Add Season Info content (KO/EN).
 - [x] **Optimization: Rendering & Data**
   - [x] Implement Offscreen Canvas for static drawing.
   - [x] Apply Integer Coordinates (Math.round) in draw loop.
@@ -81,4 +84,8 @@
   - [x] Prevent pixel click/selection during multi-touch (pinch/zoom).
   - [x] Increase maximum zoom-out range (lower minimum scale).
 - [x] **Feature: Contact Footer**
-  - [x] Add contact email to site footer.
+  - [x] Add contact email to side footer.
+- [ ] **Feature: Tile Map Service (TMS)**
+  - [/] Install `pngjs` on server.
+  - [ ] Implement `/api/pixels/tile` endpoint.
+  - [ ] Update `main.js` to render tiles.
