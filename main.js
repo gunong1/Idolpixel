@@ -2277,7 +2277,7 @@ function generateShareCard(idolName, pixelCount, baseColor, purchasedPixels) {
     // URL (New)
     ctx.fillStyle = 'rgba(255,255,255,0.4)';
     ctx.font = '12px sans-serif';
-    ctx.fillText('fandompixel.com', width - 20, height - 10);
+    ctx.fillText('www.fandom-pixel.com', width - 20, height - 10);
 
     // 5. Output
     shareCardImg.src = offCanvas.toDataURL('image/png');
