@@ -1455,18 +1455,26 @@ function updateSidePanel(singleOwnedPixel = null) {
             purchaseForm.style.display = 'block';
 
             // Auto-fill Nickname if Logged In
-            console.log(`[SidePanel] Checking Auth for Autofill: currentUser=${currentUser ? currentUser.nickname : 'null'}, Input=${!!nicknameInput}`);
 
-            if (currentUser && nicknameInput) {
-                console.log(`[SidePanel] Auto-filling nickname: ${currentUser.nickname}`);
-                nicknameInput.value = currentUser.nickname;
+            // Robust Fallback: Check DOM if currentUser var is missing but UI shows login
+            let effectiveNickname = currentUser ? currentUser.nickname : null;
+            if (!effectiveNickname) {
+                const userNicknameEl = document.getElementById('user-nickname');
+                const userInfoEl = document.getElementById('user-info');
+                // If user-info is visible and nickname is present, trust the DOM
+                if (userInfoEl && userInfoEl.style.display !== 'none' && userNicknameEl && userNicknameEl.textContent.trim()) {
+                    effectiveNickname = userNicknameEl.textContent.trim();
+                }
+            }
+
+            if (effectiveNickname && nicknameInput) {
+                nicknameInput.value = effectiveNickname;
                 nicknameInput.readOnly = true;
                 nicknameInput.disabled = false;
                 // Fix placeholder style in case it was stuck in guest mode
                 nicknameInput.style.backgroundColor = '#333';
-            } else if (!currentUser && nicknameInput) {
+            } else if (!effectiveNickname && nicknameInput) {
                 // Ensure guest state if NOT logged in (fix for half-state)
-                console.log(`[SidePanel] Setting guest state.`);
                 nicknameInput.value = '';
                 nicknameInput.disabled = true;
                 nicknameInput.placeholder = i18n.t('sidebar.placeholder_nickname');
