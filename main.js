@@ -1657,27 +1657,27 @@ async function checkPendingPayment() {
     try {
         const paymentState = JSON.parse(pendingData);
 
-        // Simple validation: Check if we are back from a redirect?
-        // In some flows, we might be here without a query param if it was a tab reload, 
-        // so strictly we should check if `paymentId` is in URL OR if we trust the existence of localstorage 
-        // implies we just tried to pay. 
-        // For robustness, let's process it if we are fairly sure it's recent (optional timestamp check).
-
-        // Check for PortOne V2 response params in URL
+        // CRITICAL: Check for PortOne V2 response params in URL
+        // Only proceed if we have actual payment success indicators
         const urlParams = new URLSearchParams(window.location.search);
         const urlPaymentId = urlParams.get('paymentId');
-
-        // If we found a pending payment in storage, we try to process it.
-        // NOTE: If payment failed / cancelled, PortOne usually redirects with error code.
-        // We should check for error indicators.
+        const impSuccess = urlParams.get('imp_success'); // PortOne V1 legacy
         const code = urlParams.get('code');
         const message = urlParams.get('message');
 
+        // STRICT VALIDATION: Require URL confirmation of payment
+        // If user pressed back button, there will be NO URL params
+        if (!urlPaymentId && !impSuccess) {
+            console.log("[Payment Recovery] No payment confirmation in URL. User likely cancelled or navigated back.");
+            console.log("[Payment Recovery] Clearing pending state to prevent false positive.");
+            localStorage.removeItem('pending_payment');
+            return;
+        }
+
+        // Check for error indicators in URL
         if (code != null) {
             // It's a response (either success or fail)
-            if (code !== '0' && code !== undefined) { // Assuming '0' might be success or absence of code implies success in some PGs
-                // Actually PortOne V2: if paymentId exists, likely success? 
-                // Let's rely on server-side validation ideally, but here we trust client flow as per existing code.
+            if (code !== '0' && code !== undefined) {
                 // If message exists, it might be an error.
                 if (paramsHaveError(urlParams)) {
                     console.error("[Payment Recovery] Payment likely failed:", message);
@@ -1687,6 +1687,7 @@ async function checkPendingPayment() {
                 }
             }
         }
+
 
         // Logic: checking if this pending payment is relevant. 
         // We assume valid because we clear it immediately after processing.
@@ -2390,52 +2391,42 @@ function generateShareCard(idolName, pixelCount, baseColor, purchasedPixels) {
         const drawOffsetY = (mapHeight - (boxHeight * drawScale)) / 2;
 
         // 5. Render FILTERED Pixels
-        // Logic: Scan all relevant pixels (could be slow if map is huge, but we can filter by range first?)
-        // Fast approach: Iterate ALL pixels in pixelMap, check if in range AND same group.
-        // Optimization: pixelMap has IDs as keys? No, it's Map<string_key, pixel_obj>
-        // World is max 60k x 60k? No, user said 10M pixels but sparsely populated.
-        // Iterating 2000 pixels is fast. Iterating 100k might lag for a ms. It's fine for a one-off card generation.
+        // Calculate pixel size - ensure minimum visibility
+        const pSize = Math.max(20 * drawScale, 0.5); // Minimum 0.5px to ensure visibility
 
-        // Draw Grid (Optional, subtle)
+        // For very large pixel counts, use sampling to improve performance
+        const shouldSample = purchasedPixels.length > 10000;
+        const sampleRate = shouldSample ? Math.ceil(purchasedPixels.length / 5000) : 1;
+
+        console.log(`[ShareCard] Rendering ${purchasedPixels.length} pixels, scale: ${drawScale.toFixed(4)}, pixelSize: ${pSize.toFixed(2)}px, sampling: ${shouldSample ? `1/${sampleRate}` : 'none'}`);
+
         // Draw Relevant Pixels
-
+        let renderedCount = 0;
         pixelMap.forEach(pixel => {
             // Filter: Only draw if within our Viewport Box
             if (pixel.x >= minX && pixel.x <= maxX && pixel.y >= minY && pixel.y <= maxY) {
-                // Filter: Only draw if SAME GROUP as purchased (or is the purchased pixel itself)
-                // This satisfies "Don't show other fandoms"
+                // Filter: Only draw if SAME GROUP as purchased
                 if (pixel.idol_group_name === idolName) {
+
+                    // Apply sampling for performance
+                    if (shouldSample && renderedCount % sampleRate !== 0) {
+                        renderedCount++;
+                        return;
+                    }
 
                     const screenX = mapX + drawOffsetX + (pixel.x - minX) * drawScale;
                     const screenY = mapY + drawOffsetY + (pixel.y - minY) * drawScale;
-                    const size = GRID_SIZE * drawScale * (1 / GRID_SIZE); // Effectively drawScale? No.
-                    // GRID_SIZE in world is 20? Wait.
-                    // pixel.x are WORLD COORDINATES.
-                    // Wait, pixel.x is usually Grid Aligned? 
-                    // Let's assume pixel.x is top-left of the pixel.
-                    // And standard pixel size is 20?
-                    // In draw(), size is determined by scale. 
-                    // Here, 1 World Unit = drawScale Card Pixels?
-                    // If pixel.x are like 0, 20, 40...
-                    // Then width is 20 * drawScale?
-
-                    // Actually, let's look at `draw()`:
-                    // ctx.fillRect((pixel.x * scale) + offsetX, ...)
-                    // So pixel.x is coordinate. Width is GRID_SIZE (20).
-
-                    const rectSize = GRID_SIZE * (drawScale / 1); // Not quite.
-                    // drawScale is (CardPixels / WorldUnits).
-                    // So 20 WorldUnits = 20 * drawScale CardPixels.
-
-                    const pSize = 20 * drawScale;
 
                     // Draw Pixel
                     ctx.fillStyle = pixel.color || baseColor;
-                    // Fix small gaps with ceil or overlapping
-                    ctx.fillRect(screenX, screenY, pSize + 0.5, pSize + 0.5);
+                    // Use ceil to prevent gaps
+                    ctx.fillRect(screenX, screenY, Math.ceil(pSize), Math.ceil(pSize));
+                    renderedCount++;
                 }
             }
         });
+
+        console.log(`[ShareCard] Rendered ${renderedCount} pixels on card`);
 
     } else {
         // Fallback if no specific pixels passed (e.g. initial view?)
