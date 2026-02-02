@@ -232,6 +232,11 @@ app.get('/api/pixels/chunk', async (req, res) => {
 
         res.set('Cache-Control', 'public, max-age=10');
 
+        // [FIX] Support JSON format for main.js compatibility
+        if (req.query.format === 'json') {
+            return res.json(pixels);
+        }
+
         const buffers = [];
         for (const p of pixels) {
             const { r, g, b } = parseColor(p.color);
