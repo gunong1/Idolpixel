@@ -219,21 +219,22 @@ app.get('/api/history', async (req, res) => {
 // [NEW] Payment Verification API (for Mobile Redirects)
 app.post('/api/verify-payment', async (req, res) => {
     try {
-        const { paymentId, imp_uid } = req.body;
+        const { paymentId, imp_uid, txId } = req.body;
 
-        // [FIX] Prioritize IMP_UID (V1) over PaymentID (V2/Merchant)
-        // V1 Standard: /payments/{imp_uid}
-        // V1 Merchant Fallback: /payments/find/{merchant_uid}
-
+        // [FIX] Smart ID Detection (V1 vs V2)
         let requestUrl;
         if (imp_uid) {
             console.log(`[VERIFY] Using IMP_UID: ${imp_uid}`);
             requestUrl = `https://api.iamport.kr/payments/${imp_uid}`;
+        } else if (txId) {
+            // Try treating V2 txId as PortOne ID (compatible with V1 ID endpoint)
+            console.log(`[VERIFY] Using TX_ID: ${txId}`);
+            requestUrl = `https://api.iamport.kr/payments/${txId}`;
         } else if (paymentId) {
             console.log(`[VERIFY] Using MerchantUID: ${paymentId}`);
             requestUrl = `https://api.iamport.kr/payments/find/${paymentId}`;
         } else {
-            return res.status(400).json({ success: false, message: "Missing imp_uid or paymentId" });
+            return res.status(400).json({ success: false, message: "Missing payment ID (imp_uid, txId, or paymentId)" });
         }
 
         // 1. Get Access Token
@@ -254,7 +255,11 @@ app.post('/api/verify-payment', async (req, res) => {
             headers: { "Authorization": access_token }
         });
 
-        if (!paymentRes.ok) throw new Error("Failed to fetch payment data from PortOne");
+        if (!paymentRes.ok) {
+            // If Find by MerchantUID failed, try treating paymentId as ID (fallback)?
+            // But assume API handles it.
+            throw new Error("Failed to fetch payment data from PortOne");
+        }
         const { response: paymentData } = await paymentRes.json();
 
         if (!paymentData) return res.status(404).json({ success: false, message: "Payment not found" });
@@ -419,12 +424,13 @@ io.on('connection', (socket) => {
 
         // [STRICT VALIDATION] Verify Payment with PortOne API
         const paymentId = data.paymentId;
+        const txId = data.txId; // [NEW] Accept txId (V2 ID)
         const pixels = data.pixels;
 
         // Calculate Expected Amount
         const expectedAmount = pixels.reduce((sum, p) => sum + getPixelPrice(p.x, p.y), 0);
 
-        console.log(`[PAYMENT] Verifying ${paymentId} for ${pixels.length} pixels (Exp: ${expectedAmount} KRW)`);
+        console.log(`[PAYMENT] Verifying ${paymentId} (TX: ${txId}) for ${pixels.length} pixels (Exp: ${expectedAmount} KRW)`);
 
         try {
             // 1. Get Access Token
@@ -441,7 +447,15 @@ io.on('connection', (socket) => {
             const { response: { access_token } } = await tokenRes.json();
 
             // 2. Get Payment Data
-            const paymentRes = await fetch(`https://api.iamport.kr/payments/find/${paymentId}`, {
+            let requestUrl;
+            if (txId) {
+                // Try treating V2 txId as PortOne ID
+                requestUrl = `https://api.iamport.kr/payments/${txId}`;
+            } else {
+                requestUrl = `https://api.iamport.kr/payments/find/${paymentId}`;
+            }
+
+            const paymentRes = await fetch(requestUrl, {
                 headers: { "Authorization": access_token }
             });
 

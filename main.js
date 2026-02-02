@@ -2151,72 +2151,63 @@ subscribeButton.onclick = async () => {
 
         } else {
             // ============================================================
-            // 2. KRW Logic (Domestic - Inicis) -> V1 SDK (IMP) [RESTORED]
+            // 2. KRW Logic (Domestic - Inicis) -> V2 SDK (PortOne) [RESTORED]
             // ============================================================
             finalAmount = totalAmount;
             finalCurrency = "KRW";
+            targetChannelKey = paymentConfig.channelKey;
 
-            console.log(`[PAYMENT] Mode: KRW(Inicis V1), Amount: ${finalAmount}`);
+            console.log(`[PAYMENT] Mode: KRW(Inicis V2), Channel: ${targetChannelKey}, Amount: ${finalAmount}`);
 
-            const IMP = window.IMP;
-            IMP.init("imp02261832"); // Ensure Init
+            if (typeof PortOne === 'undefined') {
+                return alert("결제 모듈(PortOne V2)이 로드되지 않았습니다. 새로고침 해주세요.");
+            }
 
-            // Retry Logic for Ambiguous PG Settings (Standard -> Legacy -> Default)
-            response = await new Promise((resolve) => {
-                const pgCandidates = ["html5_inicis", "inicis", null];
-                let attempt = 0;
-
-                function requestPayment() {
-                    const currentPg = pgCandidates[attempt];
-                    console.log(`[PAYMENT] Attempt ${attempt + 1}/${pgCandidates.length}: PG=${currentPg || 'Default'}`);
-
-                    const payData = {
-                        pay_method: "card",
-                        merchant_uid: paymentId,
-                        name: `Idolpixel: ${pixelsToSend.length} pixels`,
-                        amount: finalAmount,
-                        buyer_email: currentUser ? currentUser.email : undefined,
-                        buyer_name: nickname,
-                        buyer_tel: "010-0000-0000",
-                        m_redirect_url: window.location.href
-                    };
-                    if (currentPg) payData.pg = currentPg;
-
-                    IMP.request_pay(payData, async function (rsp) {
-                        if (rsp.success) {
-                            console.log("[PAYMENT] V1 PC Auth Success. Verifying...", rsp.imp_uid);
-                            try {
-                                const vRes = await fetch('/api/verify-payment', {
-                                    method: 'POST',
-                                    headers: { 'Content-Type': 'application/json' },
-                                    body: JSON.stringify({ imp_uid: rsp.imp_uid, paymentId: paymentId })
-                                });
-                                const vData = await vRes.json();
-                                if (vData.success) {
-                                    resolve(rsp);
-                                } else {
-                                    resolve({ code: "VERIFY_FAIL", message: "서버 검증 실패: " + vData.message });
-                                }
-                            } catch (e) {
-                                resolve({ code: "VERIFY_ERR", message: "서버 통신 오류" });
-                            }
-                        } else {
-                            console.error(`[PAYMENT] Fail (PG=${currentPg}):`, rsp.error_msg);
-                            // Retry if "pg parameter" error is detected
-                            if (rsp.error_msg && (rsp.error_msg.includes("pg") || rsp.error_msg.includes("PG")) && attempt < pgCandidates.length - 1) {
-                                console.warn("[PAYMENT] Retrying with alternative PG setup...");
-                                attempt++;
-                                // Short delay before retry to clear invalid invocation state if any
-                                setTimeout(requestPayment, 100);
-                            } else {
-                                resolve({ code: "V1_FAIL", message: rsp.error_msg });
-                            }
-                        }
-                    });
+            const paymentRequest = {
+                storeId: paymentConfig.storeId,
+                paymentId: paymentId,
+                orderName: `Idolpixel: ${pixelsToSend.length} pixels`,
+                totalAmount: finalAmount,
+                currency: "KRW",
+                channelKey: targetChannelKey,
+                payMethod: "CARD",
+                customer: {
+                    fullName: nickname,
+                    phoneNumber: "010-0000-0000",
+                    email: currentUser ? currentUser.email : undefined,
                 }
+            };
 
-                requestPayment(); // Start
-            });
+            // Mobile Redirect Logic (V2)
+            if (isMobile()) {
+                console.log("[PAYMENT] Mobile environment detected. Requesting Session Recovery Token...");
+                try {
+                    const tokenRes = await fetch('/api/auth/recovery-token', { method: 'POST' });
+                    if (tokenRes.ok) {
+                        const tokenData = await tokenRes.json();
+                        if (tokenData.token) {
+                            const returnUrl = new URL(window.location.origin + window.location.pathname);
+                            returnUrl.searchParams.set('restore_session', tokenData.token);
+                            paymentRequest.redirectUrl = returnUrl.toString();
+                        }
+                    } else {
+                        paymentRequest.redirectUrl = window.location.origin + window.location.pathname;
+                    }
+                } catch (e) {
+                    paymentRequest.redirectUrl = window.location.origin + window.location.pathname;
+                }
+            }
+
+            response = await PortOne.requestPayment(paymentRequest);
+
+            // [Important] V2 returns { paymentId, txId, ... } on success.
+            // If we are strictly using V1 API on backend, we might need txId.
+            // We'll handle this in server.js verify logic.
+            if (response.txId) {
+                console.log("[PAYMENT] Captured txId for V1 compatibility:", response.txId);
+                // We piggyback txId into response for downstream usage if needed, 
+                // though response already has it.
+            }
         }
 
         if (response.code !== undefined) {
@@ -2246,7 +2237,8 @@ subscribeButton.onclick = async () => {
             idolColor: color,
             idolGroupName: idolGroupName,
             nickname: nickname,
-            paymentId: paymentId // REQUIRED for Server Verification
+            paymentId: paymentId, // Merchant UID
+            txId: response.txId || response.imp_uid // V2 Transaction ID or V1 IMP UID
         };
         socket.emit('purchase_pixels', purchaseData);
 
