@@ -1980,90 +1980,25 @@ subscribeButton.onclick = async () => {
         // --- Payment Channel & Currency Logic ---
         let finalAmount = totalAmount;
         let finalCurrency = "KRW";
-        // Default to KRW Channel (Inicis)
         let targetChannelKey = paymentConfig.channelKey;
-
-        // Base Request (Common Fields)
-        let paymentRequest = {};
-
-        if (i18n.locale === 'en') {
-            // --- USD Logic (Global - PayPal) ---
-            // Exchange Rate: 1450 KRW = 1 USD
-            const exchangeRate = 1450;
-            // Calculate Integer Amount (Floor to avoid decimals)
-            let usdAmount = Math.floor(totalAmount / exchangeRate);
-
-            // Enforce Minimum 1 USD (Integer)
-            if (usdAmount < 1) usdAmount = 1;
-
-            finalAmount = usdAmount;
-            finalCurrency = "USD";
-
-            // Determine Channel Key (PayPal)
-            if (paymentConfig.channelKeyGlobal) {
-                targetChannelKey = paymentConfig.channelKeyGlobal;
-            } else {
-                console.warn("[PAYMENT] Global Channel Key missing, falling back to default.");
-            }
-
-            // [Request Strategy v18: Whitelist + Mandatory Fields]
-            // REQUIRED: storeId, channelKey, paymentId, orderName, totalAmount, currency, payMethod
-            // FORBIDDEN: windowType, customer, products, escrow, bypass
-            paymentRequest = {
-                storeId: paymentConfig.storeId,
-                paymentId: paymentId,
-                orderName: `Idolpixel: ${pixelsToSend.length} pixels`,
-                totalAmount: finalAmount,
-                currency: "USD",
-                channelKey: targetChannelKey,
-                payMethod: "PAYPAL" // Mandatory Field
-            };
-
-        } else {
-            // --- KRW Logic (Domestic - Inicis) ---
-            finalAmount = totalAmount;
-            finalCurrency = "KRW";
-            targetChannelKey = paymentConfig.channelKey;
-
-            // Construct standard object for KRW
-            paymentRequest = {
-                storeId: paymentConfig.storeId,
-                paymentId: paymentId,
-                orderName: `Idolpixel: ${pixelsToSend.length} pixels`,
-                totalAmount: finalAmount,
-                currency: "KRW",
-                channelKey: targetChannelKey,
-                payMethod: "CARD",
-                customer: {
-                    fullName: nickname,
-                    phoneNumber: "010-0000-0000", // Required by KG Inicis V2
-                    email: currentUser ? currentUser.email : undefined,
-                }
-            };
-        }
-
-
-        console.log(`[PAYMENT] Mode: ${i18n.locale}, Channel: ${targetChannelKey}, Amount: ${finalAmount} ${finalCurrency}`);
-
+        let response; // Will hold the payment response
 
         // Helper: Mobile Detection
         function isMobile() {
             return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
         }
 
-        // --- Persist State for Mobile Redirects ---
-        // We save before requestPayment because mobile will redirect immediately
+        // --- Persist State for Mobile Redirects (Run for ALL users) ---
         console.log("[PAYMENT] Saving pending state for mobile recovery...");
         const paymentState = {
             pixelsToSend: pixelsToSend,
             idolGroupName: idolGroupName,
             nickname: nickname,
             paymentId: paymentId,
-            baseColor: null, // Will calculate below to save consistent color
+            baseColor: null,
             timestamp: Date.now()
         };
 
-        // Pre-calculate color to ensure consistency
         if (idolInfo[idolGroupName]) {
             paymentState.baseColor = idolInfo[idolGroupName].color;
         } else {
@@ -2074,39 +2009,89 @@ subscribeButton.onclick = async () => {
             const h = Math.abs(hash) % 360;
             paymentState.baseColor = `hsla(${h}, 70%, 60%, 0.7)`;
         }
-
         localStorage.setItem('pending_payment', JSON.stringify(paymentState));
 
 
-        // --- Request Payment ---
-        // Add redirectUrl for Mobile Environments to prevent popup blocking and ensure return
-        if (isMobile()) {
-            console.log("[PAYMENT] Mobile environment detected. Requesting Session Recovery Token...");
+        if (i18n.locale === 'en') {
+            // ============================================================
+            // 1. USD Logic (Global - PayPal) - STRICT CLEAN OBJECT
+            // ============================================================
+            const exchangeRate = 1450;
+            let usdAmount = Math.floor(totalAmount / exchangeRate);
+            if (usdAmount < 1) usdAmount = 1;
 
-            try {
-                // Request One-Time Session Recovery Token
-                const tokenRes = await fetch('/api/auth/recovery-token', { method: 'POST' });
-                if (tokenRes.ok) {
-                    const tokenData = await tokenRes.json();
-                    if (tokenData.token) {
-                        console.log(`[PAYMENT] Recovery Token obtained: ${tokenData.token}`);
-                        // Append token to redirect URL
-                        const returnUrl = new URL(window.location.origin + window.location.pathname);
-                        // Add query param to indicate return from payment
-                        returnUrl.searchParams.set('restore_session', tokenData.token);
-                        paymentRequest.redirectUrl = returnUrl.toString();
+            finalAmount = usdAmount;
+            finalCurrency = "USD";
+
+            if (paymentConfig.channelKeyGlobal) {
+                targetChannelKey = paymentConfig.channelKeyGlobal;
+            } else {
+                console.warn("[PAYMENT] Global Channel Key missing, falling back to default.");
+            }
+
+            console.log(`[PAYMENT] Mode: USD(PayPal), Channel: ${targetChannelKey}, Amount: ${finalAmount}`);
+
+            // [HARDCODED CLEAN OBJECT]
+            const paypalData = {
+                storeId: paymentConfig.storeId,
+                channelKey: targetChannelKey,
+                paymentId: paymentId,
+                orderName: `Idolpixel: ${pixelsToSend.length} pixels`,
+                totalAmount: finalAmount,
+                currency: "USD",
+                payMethod: "PAYPAL" // Mandatory
+            };
+
+            // Call Payment immediately (Bypassing mobile token logic which adds redirection clutter)
+            response = await PortOne.requestPayment(paypalData);
+
+        } else {
+            // ============================================================
+            // 2. KRW Logic (Domestic - Inicis) - EXISTING LOGIC
+            // ============================================================
+            finalAmount = totalAmount;
+            finalCurrency = "KRW";
+            targetChannelKey = paymentConfig.channelKey;
+
+            console.log(`[PAYMENT] Mode: KRW, Channel: ${targetChannelKey}, Amount: ${finalAmount}`);
+
+            const paymentRequest = {
+                storeId: paymentConfig.storeId,
+                paymentId: paymentId,
+                orderName: `Idolpixel: ${pixelsToSend.length} pixels`,
+                totalAmount: finalAmount,
+                currency: "KRW",
+                channelKey: targetChannelKey,
+                payMethod: "CARD",
+                customer: {
+                    fullName: nickname,
+                    phoneNumber: "010-0000-0000",
+                    email: currentUser ? currentUser.email : undefined,
+                }
+            };
+
+            // Mobile Redirect Logic (Only for KRW/Inicis which uses redirects)
+            if (isMobile()) {
+                console.log("[PAYMENT] Mobile environment detected. Requesting Session Recovery Token...");
+                try {
+                    const tokenRes = await fetch('/api/auth/recovery-token', { method: 'POST' });
+                    if (tokenRes.ok) {
+                        const tokenData = await tokenRes.json();
+                        if (tokenData.token) {
+                            const returnUrl = new URL(window.location.origin + window.location.pathname);
+                            returnUrl.searchParams.set('restore_session', tokenData.token);
+                            paymentRequest.redirectUrl = returnUrl.toString();
+                        }
+                    } else {
+                        paymentRequest.redirectUrl = window.location.origin + window.location.pathname;
                     }
-                } else {
-                    console.warn("[PAYMENT] Failed to get recovery token. Proceeding without session recovery.");
+                } catch (e) {
                     paymentRequest.redirectUrl = window.location.origin + window.location.pathname;
                 }
-            } catch (e) {
-                console.error("[PAYMENT] Error fetching recovery token:", e);
-                paymentRequest.redirectUrl = window.location.origin + window.location.pathname;
             }
-        }
 
-        const response = await PortOne.requestPayment(paymentRequest);
+            response = await PortOne.requestPayment(paymentRequest);
+        }
 
         if (response.code !== undefined) {
             console.error("Payment failed:", response); // Log full response for debugging
