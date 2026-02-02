@@ -1978,6 +1978,13 @@ subscribeButton.onclick = async () => {
         console.log(`[PAYMENT] Requesting payment for ${pixelsToSend.length} pixels (Total: ₩${totalAmount})`);
 
         // --- Payment Channel & Currency Logic ---
+
+        // [MINIMUM PAYMENT CHECK] 1000 KRW Threshold
+        if (totalAmount < 1000) {
+            alert("최소 결제 금액은 1,000원입니다. 픽셀을 더 선택해주세요! (Minimum payment is 1,000 KRW)");
+            return;
+        }
+
         let finalAmount = totalAmount;
         let finalCurrency = "KRW";
         let targetChannelKey = paymentConfig.channelKey;
