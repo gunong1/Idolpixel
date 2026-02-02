@@ -415,7 +415,19 @@ app.get('/api/me', (req, res) => {
 });
 
 
+
 // API Routes
+
+// NEW: Payment Configuration Endpoint
+app.get('/api/config/payment', (req, res) => {
+    // Return public keys only. NEVER return API Secret here.
+    res.json({
+        storeId: process.env.PORTONE_STORE_ID,
+        channelKey: process.env.PORTONE_CHANNEL_KEY,
+        paymentIdPrefix: process.env.PAYMENT_ID_PREFIX || 'prod-'
+    });
+});
+
 
 // NEW: History API (Moved here to be after middleware)
 app.get('/api/history', (req, res) => {
