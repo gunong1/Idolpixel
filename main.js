@@ -2019,7 +2019,10 @@ subscribeButton.onclick = async () => {
             paymentRequest.totalAmount = finalAmount;
             paymentRequest.currency = "USD";
             paymentRequest.channelKey = targetChannelKey;
-            // paymentRequest.payMethod = "EASY_PAY"; // Removed as per V2 docs for PayPal
+            paymentRequest.payMethod = "EASY_PAY";
+            paymentRequest.easyPay = {
+                providerId: "PAYPAL"
+            };
             paymentRequest.windowType = {
                 pc: 'IFRAME',
                 mobile: 'POPUP'
