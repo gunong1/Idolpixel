@@ -2006,7 +2006,8 @@ subscribeButton.onclick = async () => {
                 console.warn("[PAYMENT] Global Channel Key missing, falling back to default.");
             }
 
-            // [WHITELIST STRATEGY] Construct clean object for PayPal
+            // [Request Strategy v17: Extreme Minimalism]
+            // ONLY 6 Fields. NO payMethod. NO windowType.
             paymentRequest = {
                 storeId: paymentConfig.storeId,
                 paymentId: paymentId,
@@ -2014,12 +2015,7 @@ subscribeButton.onclick = async () => {
                 totalAmount: finalAmount,
                 currency: "USD",
                 channelKey: targetChannelKey,
-                payMethod: "PAYPAL", // Explicit Enum
-                windowType: {
-                    pc: 'IFRAME',
-                    mobile: 'POPUP'
-                }
-                // NO customer (phone), cardQuota, escrow, bypass here!
+                // payMethod REMOVED (Implicit by Channel Key)
             };
 
         } else {
