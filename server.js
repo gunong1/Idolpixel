@@ -604,4 +604,11 @@ io.on('connection', (socket) => {
 
 server.listen(port, () => {
     console.log(`Server running on port ${port} (MongoDB)`);
+    console.log("--- PortOne Configuration Check ---");
+    console.log(`V1 IMP_KEY: ${process.env.IMP_KEY ? 'LOADED ' + process.env.IMP_KEY.slice(0, 4) + '...' : 'MISSING'}`);
+    console.log(`V1 IMP_SECRET: ${process.env.IMP_SECRET ? 'LOADED (Present)' : 'MISSING'}`);
+    console.log(`V2 API_SECRET: ${process.env.PORTONE_API_SECRET ? 'LOADED (Present)' : 'MISSING'}`);
+    if (process.env.PORTONE_API_SECRET === process.env.IMP_SECRET) {
+        console.warn("WARN: PORTONE_API_SECRET appears to be identical to IMP_SECRET. Check .env naming!");
+    }
 });
