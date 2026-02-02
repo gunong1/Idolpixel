@@ -2018,7 +2018,7 @@ subscribeButton.onclick = async () => {
             paymentRequest.totalAmount = finalAmount;
             paymentRequest.currency = "USD";
             paymentRequest.channelKey = targetChannelKey;
-            paymentRequest.payMethod = "PAYPAL"; // Easy Pay fallback
+            paymentRequest.payMethod = "EASY_PAY"; // Correct method for PayPal in PortOne V2 // Easy Pay fallback
         } else {
             // KRW Logic (Domestic - Inicis)
             finalAmount = totalAmount;
