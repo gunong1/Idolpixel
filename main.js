@@ -2694,9 +2694,23 @@ function showTickerMessage(data) {
 }
 
 // Socket Listeners for Ticker
+// Socket Listeners for Ticker
 socket.on('batch_pixel_update', (pixels) => {
     console.log("[Ticker] Received batch update:", pixels.length);
     if (pixels && pixels.length > 0) {
+        // [FIX] Update PixelMap with new data so stats/render are correct
+        pixels.forEach(p => {
+            // Normalize to ensure recalculateStats works (or let it handle mix)
+            // We'll store what we get, but ensure stats handles it.
+            const pKey = `${p.x},${p.y}`;
+            pixelMap.set(pKey, p);
+        });
+
+        requestClusterUpdate(); // Update clusters/visuals
+        recalculateStats();     // Update counts (Holdings Info)
+        needsRedraw = true;     // Force render
+        if (typeof _render === 'function') _render();
+
         showTickerMessage(pixels);
     }
 });
@@ -2705,7 +2719,18 @@ socket.on('batch_pixel_update', (pixels) => {
 socket.on('pixel_update', (data) => {
     console.log("[Ticker] Received single update:", data);
     if (data) {
-        showTickerMessage([data]);
+        const pixels = Array.isArray(data) ? data : [data];
+        pixels.forEach(p => {
+            const pKey = `${p.x},${p.y}`;
+            pixelMap.set(pKey, p);
+        });
+
+        requestClusterUpdate();
+        recalculateStats();
+        needsRedraw = true;
+        if (typeof _render === 'function') _render();
+
+        showTickerMessage(pixels);
     }
 });
 
@@ -2800,10 +2825,11 @@ function recalculateStats() {
     userGroupPixelCounts.clear();
 
     pixelMap.forEach(pixel => {
-        if (!pixel.owner_nickname) return;
+        // [FIX] Normalize keys (DB: snake_case, Socket: camelCase)
+        const owner = pixel.owner_nickname || pixel.ownerNickname;
+        const group = pixel.idol_group_name || pixel.idolGroupName;
 
-        const owner = pixel.owner_nickname;
-        const group = pixel.idol_group_name;
+        if (!owner) return;
 
         // User Count
         userPixelCounts.set(owner, (userPixelCounts.get(owner) || 0) + 1);
@@ -2817,7 +2843,20 @@ function recalculateStats() {
             userGroupPixelCounts.set(userGroupKey, (userGroupPixelCounts.get(userGroupKey) || 0) + 1);
         }
     });
-    console.log(`[Stats] Recalculation complete. PixelMap size: ${pixelMap.size}, Unique Owners: ${userPixelCounts.size}`);
+
+    // User Count
+    userPixelCounts.set(owner, (userPixelCounts.get(owner) || 0) + 1);
+
+    if (group) {
+        // Group Count
+        idolPixelCounts.set(group, (idolPixelCounts.get(group) || 0) + 1);
+
+        // User-Group Count (Format: owner:group)
+        const userGroupKey = `${owner}:${group}`;
+        userGroupPixelCounts.set(userGroupKey, (userGroupPixelCounts.get(userGroupKey) || 0) + 1);
+    }
+});
+console.log(`[Stats] Recalculation complete. PixelMap size: ${pixelMap.size}, Unique Owners: ${userPixelCounts.size}`);
 }
 
 let clusterUpdateTimeout = null;
