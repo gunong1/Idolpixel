@@ -580,9 +580,10 @@ class ChunkManager {
                 });
                 requestClusterUpdate(); // Trigger label generation
 
-                // [FIX] Force immediate render to prevent "Lazy Rendering"
+                // [FIX] Force immediate synchronous render - Bypassing lazy draw
                 needsRedraw = true;
-                draw(); // Trigger immediate frame
+                if (typeof _render === 'function') _render(); // Direct synchronous call
+                else draw(); // Fallback
             }
 
             // Mark data as loaded for this chunk
