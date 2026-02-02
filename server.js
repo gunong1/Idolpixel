@@ -446,21 +446,38 @@ io.on('connection', (socket) => {
             if (!tokenRes.ok) throw new Error("Failed to get PortOne Access Token");
             const { response: { access_token } } = await tokenRes.json();
 
-            // 2. Get Payment Data
-            let requestUrl;
+            // 2. Get Payment Data (Robust Lookup with Fallback)
+            let paymentData = null;
+
+            // Attempt A: Lookup by Standard ID (txId)
             if (txId) {
-                // Try treating V2 txId as PortOne ID
-                requestUrl = `https://api.iamport.kr/payments/${txId}`;
-            } else {
-                requestUrl = `https://api.iamport.kr/payments/find/${paymentId}`;
+                try {
+                    console.log(`[VERIFY] Attempting lookup by txId: ${txId}`);
+                    const res = await fetch(`https://api.iamport.kr/payments/${txId}`, {
+                        headers: { "Authorization": access_token }
+                    });
+                    if (res.ok) {
+                        const json = await res.json();
+                        paymentData = json.response;
+                    }
+                } catch (e) {
+                    console.warn(`[VERIFY] Lookup by txId failed: ${e.message}`);
+                }
             }
 
-            const paymentRes = await fetch(requestUrl, {
-                headers: { "Authorization": access_token }
-            });
+            // Attempt B: Lookup by Merchant UID (paymentId)
+            if (!paymentData) {
+                console.log(`[VERIFY] Fallback lookup by paymentId: ${paymentId}`);
+                const res = await fetch(`https://api.iamport.kr/payments/find/${paymentId}`, {
+                    headers: { "Authorization": access_token }
+                });
+                if (res.ok) {
+                    const json = await res.json();
+                    paymentData = json.response;
+                }
+            }
 
-            if (!paymentRes.ok) throw new Error("Failed to fetch payment data");
-            const { response: paymentData } = await paymentRes.json();
+            if (!paymentData) throw new Error("Failed to find payment data via txId OR paymentId");
 
             // 3. Verify Amount & Status
             if (!paymentData) throw new Error("Payment data is null");
