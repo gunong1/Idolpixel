@@ -2162,7 +2162,7 @@ subscribeButton.onclick = async () => {
 
             response = await new Promise((resolve) => {
                 IMP.request_pay({
-                    pg: "inicis",     // [FIX] Try Legacy Code if html5_inicis fails
+                    pg: "html5_inicis",     // [FIX] Standard Web PG (Must match Console)
                     pay_method: "card",
                     merchant_uid: paymentId,
                     name: `Idolpixel: ${pixelsToSend.length} pixels`,
