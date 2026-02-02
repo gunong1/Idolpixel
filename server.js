@@ -228,7 +228,9 @@ app.get('/api/pixels/chunk', async (req, res) => {
             x: { $gte: minX, $lt: maxX },
             y: { $gte: minY, $lt: maxY },
             color: { $ne: null }
-        }).lean();
+        })
+            .select('x y color idol_group_name owner_nickname -_id') // Exclude _id, include needed fields
+            .lean();
 
         res.set('Cache-Control', 'public, max-age=10');
 
