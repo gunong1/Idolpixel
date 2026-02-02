@@ -220,11 +220,21 @@ app.get('/api/history', async (req, res) => {
 app.post('/api/verify-payment', async (req, res) => {
     try {
         const { paymentId, imp_uid } = req.body;
-        const targetId = paymentId || imp_uid;
 
-        if (!targetId) return res.status(400).json({ success: false, message: "Missing paymentId" });
+        // [FIX] Prioritize IMP_UID (V1) over PaymentID (V2/Merchant)
+        // V1 Standard: /payments/{imp_uid}
+        // V1 Merchant Fallback: /payments/find/{merchant_uid}
 
-        console.log(`[VERIFY] Checking Payment ID: ${targetId}`);
+        let requestUrl;
+        if (imp_uid) {
+            console.log(`[VERIFY] Using IMP_UID: ${imp_uid}`);
+            requestUrl = `https://api.iamport.kr/payments/${imp_uid}`;
+        } else if (paymentId) {
+            console.log(`[VERIFY] Using MerchantUID: ${paymentId}`);
+            requestUrl = `https://api.iamport.kr/payments/find/${paymentId}`;
+        } else {
+            return res.status(400).json({ success: false, message: "Missing imp_uid or paymentId" });
+        }
 
         // 1. Get Access Token
         const tokenRes = await fetch("https://api.iamport.kr/users/getToken", {
@@ -240,11 +250,11 @@ app.post('/api/verify-payment', async (req, res) => {
         const { response: { access_token } } = await tokenRes.json();
 
         // 2. Get Payment Data
-        const paymentRes = await fetch(`https://api.iamport.kr/payments/find/${targetId}`, {
+        const paymentRes = await fetch(requestUrl, {
             headers: { "Authorization": access_token }
         });
 
-        if (!paymentRes.ok) throw new Error("Failed to fetch payment data");
+        if (!paymentRes.ok) throw new Error("Failed to fetch payment data from PortOne");
         const { response: paymentData } = await paymentRes.json();
 
         if (!paymentData) return res.status(404).json({ success: false, message: "Payment not found" });
