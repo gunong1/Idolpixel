@@ -1,507 +1,242 @@
 require('dotenv').config();
 const express = require('express');
-const Database = require('better-sqlite3');
+const mongoose = require('mongoose');
 const session = require('express-session');
 const passport = require('passport');
 const fs = require('fs');
 const path = require('path');
 const GoogleStrategy = require('passport-google-oauth20').Strategy;
+const MongoStore = require('connect-mongo').default;
 const app = express();
 app.set('trust proxy', 1);
 const compression = require('compression');
 app.use(compression());
 app.use('/locales', express.static(path.join(__dirname, 'locales')));
-app.use(express.static(__dirname)); // Serve other static files (css, js, images) from root
+app.use(express.static(__dirname));
 const http = require('http');
 const server = http.createServer(app);
 const { Server } = require("socket.io");
 const io = new Server(server, {
-    cors: {
-        origin: "*", // Allow all origins (or restrict to your domain)
-        methods: ["GET", "POST"]
-    },
-    maxHttpBufferSize: 1e8 // 100 MB
+    cors: { origin: "*", methods: ["GET", "POST"] },
+    maxHttpBufferSize: 1e8
 });
 
 const port = process.env.PORT || 3000;
-const db = new Database('database.db');
 
-// --- DATABASE OPTIMIZATION ---
-db.pragma('journal_mode = WAL'); // Better concurrency
-db.prepare('CREATE INDEX IF NOT EXISTS idx_pixels_xy ON pixels(x, y)').run(); // Fast range queries
+// --- MONGODB CONNECTION ---
+const MONGODB_URI = process.env.MONGODB_URI;
 
-// --- Seasonal History Table (Hall of Fame) ---
-db.exec(`
-    CREATE TABLE IF NOT EXISTS season_history (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        season_key TEXT UNIQUE, -- e.g. "2026-Q1"
-        season_name TEXT,       -- e.g. "Season 1"
-        winner_group TEXT,
-        ranking_json TEXT,      -- Top 10 Ranking Snapshot (JSON)
-        snapshot_path TEXT,     -- Path to pixel dump JSON
-        pixel_count INTEGER,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    )
-`);
-// --- DATABASE MIGRATIONS ---
-try {
-    console.log("[MIGRATION] Attempting to add columns...");
-    // FIX: Removed DEFAULT CURRENT_TIMESTAMP to avoid "non-constant default" error
-    db.prepare("ALTER TABLE pixels ADD COLUMN purchased_at DATETIME").run();
-    console.log("[MIGRATION] Added 'purchased_at'");
-} catch (e) {
-    console.log("[MIGRATION] 'purchased_at' status: " + e.message);
-}
-try {
-    db.prepare("ALTER TABLE pixels ADD COLUMN expires_at DATETIME").run();
-    console.log("[MIGRATION] Added 'expires_at'");
-} catch (e) {
-    console.log("[MIGRATION] 'expires_at' status: " + e.message);
+if (!MONGODB_URI) {
+    console.error("FATAL: MONGODB_URI is missing in .env");
+    process.exit(1);
 }
 
-// Check Schema
-try {
-    const columns = db.pragma('table_info(pixels)');
-    console.log("[SCHEMA] Current columns:", columns.map(c => c.name).join(', '));
-} catch (e) {
-    console.error("[SCHEMA] Failed to read schema:", e);
-}
+mongoose.connect(MONGODB_URI)
+    .then(() => console.log('MongoDB Connected via Mongoose'))
+    .catch(err => {
+        console.error('MongoDB Connection Error:', err);
+        process.exit(1);
+    });
+
+// --- SCHEMAS ---
+
+// 1. Pixel Schema
+const pixelSchema = new mongoose.Schema({
+    x: { type: Number, required: true },
+    y: { type: Number, required: true },
+    color: { type: String, default: null },
+    idol_group_name: { type: String, default: null },
+    owner_nickname: { type: String, default: null },
+    purchased_at: { type: Date, default: null },
+    expires_at: { type: Date, default: null, index: true } // Index for expiration cleanup
+});
+// Composite Index for fast lookup by coordinate
+pixelSchema.index({ x: 1, y: 1 }, { unique: true });
+
+const Pixel = mongoose.model('Pixel', pixelSchema);
+
+// 2. User Schema
+const userSchema = new mongoose.Schema({
+    googleId: { type: String, unique: true, required: true },
+    email: { type: String, required: true },
+    nickname: { type: String, required: true },
+    createdAt: { type: Date, default: Date.now }
+});
+const User = mongoose.model('User', userSchema);
+
+// 3. Auth Token Schema (Session Recovery)
+const authTokenSchema = new mongoose.Schema({
+    token: { type: String, unique: true, required: true },
+    userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    createdAt: { type: Date, default: Date.now },
+    expiresAt: { type: Date, required: true, index: { expires: '0s' } } // TTL Index
+});
+const AuthToken = mongoose.model('AuthToken', authTokenSchema);
+
 
 // --- Middleware ---
-// ... (rest of middleware)
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
-// ... (existing routes)
-
-// (Moved to io.on connection block below)
-
-const SQLiteStore = require('connect-sqlite3')(session);
-
-// ... (previous imports)
-
+// --- Session Store (MongoDB) ---
 app.use(session({
-    store: new SQLiteStore({ db: 'sessions.db', dir: '.' }), // Persist sessions in SQLite
+    store: MongoStore.create({
+        mongoUrl: MONGODB_URI,
+        collectionName: 'sessions',
+        ttl: 14 * 24 * 60 * 60 // 14 days
+    }),
     secret: process.env.SESSION_SECRET || 'dev_secret_key',
     resave: false,
     saveUninitialized: false,
     cookie: {
-        secure: false, // Set true if HTTPS
-        maxAge: 7 * 24 * 60 * 60 * 1000 // 1 week
+        secure: false, // Set true for production HTTPS
+        maxAge: 14 * 24 * 60 * 60 * 1000
     }
 }));
-
-// --- Helper: Color Parser (Hex & RGBA) ---
-function parseColor(colorStr) {
-    let r = 0, g = 0, b = 0;
-    if (!colorStr) return { r, g, b };
-
-    if (colorStr.startsWith('#')) {
-        // Hex
-        if (colorStr.length === 7) {
-            r = parseInt(colorStr.substring(1, 3), 16) || 0;
-            g = parseInt(colorStr.substring(3, 5), 16) || 0;
-            b = parseInt(colorStr.substring(5, 7), 16) || 0;
-        }
-    } else if (colorStr.startsWith('rgba') || colorStr.startsWith('rgb')) {
-        // RGBA / RGB: rgba(0, 123, 255, 0.9)
-        const parts = colorStr.match(/\d+/g);
-        if (parts && parts.length >= 3) {
-            r = parseInt(parts[0]);
-            g = parseInt(parts[1]);
-            b = parseInt(parts[2]);
-        }
-    }
-    return { r, g, b };
-}
-
-// ... (middleware) ...
-
-// NEW: Chunk Loading API
-app.get('/api/pixels/chunk', (req, res) => {
-    let { minX, minY, maxX, maxY } = req.query;
-
-    if (minX === undefined || minY === undefined || maxX === undefined || maxY === undefined) {
-        return res.status(400).json({ error: 'Missing bounds parameters' });
-    }
-
-    // Bounds validation
-    minX = Number(minX); minY = Number(minY);
-    maxX = Number(maxX); maxY = Number(maxY);
-
-    try {
-        const stmt = db.prepare('SELECT * FROM pixels WHERE x >= ? AND x < ? AND y >= ? AND y < ?');
-        const rows = stmt.all(minX, maxX, minY, maxY);
-
-        res.set('Cache-Control', 'public, max-age=10');
-
-        if (req.query.format === 'json') {
-            return res.json(rows);
-        }
-
-        const buffers = [];
-        for (const p of rows) {
-            const { r, g, b } = parseColor(p.color);
-
-            let groupBuf = Buffer.from(p.idol_group_name || '');
-            if (groupBuf.length > 255) groupBuf = groupBuf.subarray(0, 255);
-
-            let ownerBuf = Buffer.from(p.owner_nickname || '');
-            if (ownerBuf.length > 255) ownerBuf = ownerBuf.subarray(0, 255);
-
-            const buf = Buffer.alloc(2 + 2 + 3 + 1 + groupBuf.length + 1 + ownerBuf.length);
-            let offset = 0;
-            buf.writeUInt16BE(p.x, offset); offset += 2;
-            buf.writeUInt16BE(p.y, offset); offset += 2;
-            buf.writeUInt8(r, offset); offset += 1;
-            buf.writeUInt8(g, offset); offset += 1;
-            buf.writeUInt8(b, offset); offset += 1;
-
-            buf.writeUInt8(groupBuf.length, offset); offset += 1;
-            if (groupBuf.length > 0) {
-                groupBuf.copy(buf, offset); offset += groupBuf.length;
-            }
-
-            buf.writeUInt8(ownerBuf.length, offset); offset += 1;
-            if (ownerBuf.length > 0) {
-                ownerBuf.copy(buf, offset); offset += ownerBuf.length;
-            }
-            buffers.push(buf);
-        }
-        res.set('Content-Type', 'application/octet-stream');
-        res.send(Buffer.concat(buffers));
-    } catch (err) {
-        console.error("Error fetching chunk:", err);
-        res.status(500).send(err.message);
-    }
-});
-
-app.get('/api/pixels/tile', (req, res) => {
-    const tx = parseInt(req.query.x);
-    const ty = parseInt(req.query.y);
-    const zoom = parseInt(req.query.zoom) || 1;
-
-    // Standard Tile Size
-    const TILE_SIZE = 256;
-    const EFFECTIVE_SIZE = TILE_SIZE * zoom;
-
-    const minX = tx * EFFECTIVE_SIZE;
-    const minY = ty * EFFECTIVE_SIZE;
-    const maxX = minX + EFFECTIVE_SIZE;
-    const maxY = minY + EFFECTIVE_SIZE;
-
-    try {
-        const stmt = db.prepare(`SELECT x, y, color FROM pixels WHERE x >= ? AND x < ? AND y >= ? AND y < ?`);
-        const rows = stmt.all(minX, maxX, minY, maxY);
-
-        const png = new PNG({ width: TILE_SIZE, height: TILE_SIZE });
-
-        for (const p of rows) {
-            const lx = p.x - minX;
-            const ly = p.y - minY;
-
-            // Scale down to 256x256
-            const targetX = Math.floor(lx / zoom);
-            const targetY = Math.floor(ly / zoom);
-
-            if (targetX < 0 || targetX >= TILE_SIZE || targetY < 0 || targetY >= TILE_SIZE) continue;
-
-            const { r, g, b } = parseColor(p.color);
-
-            const idx = (targetY * TILE_SIZE + targetX) << 2;
-
-            // Simple Draw (Overwrite)
-            png.data[idx] = r;
-            png.data[idx + 1] = g;
-            png.data[idx + 2] = b;
-            png.data[idx + 3] = 255; // Alpha
-        }
-
-        res.setHeader('Content-Type', 'image/png');
-        res.setHeader('Cache-Control', 'public, max-age=60');
-        png.pack().pipe(res);
-
-    } catch (err) {
-        console.error("Error generating tile:", err);
-        res.status(500).send("Tile Error");
-    }
-});
 
 app.use(passport.initialize());
 app.use(passport.session());
 
-app.use(express.static(__dirname));
-
-// --- Passport Configuration ---
+// --- Passport Config ---
 passport.serializeUser((user, done) => {
-    done(null, user.id);
+    done(null, user.id); // user.id is string (MongoDB _id)
 });
 
-passport.deserializeUser((id, done) => {
+passport.deserializeUser(async (id, done) => {
     try {
-        const user = db.prepare('SELECT * FROM users WHERE id = ?').get(id);
-        console.log("Deserializing user ID:", id);
+        const user = await User.findById(id);
         done(null, user);
     } catch (err) {
-        console.error("Error deserializing user:", err);
         done(err, null);
     }
 });
 
-// Google Strategy
-if (process.env.GOOGLE_CLIENT_ID) {
-    console.log("Google Client ID loaded:", process.env.GOOGLE_CLIENT_ID.substring(0, 10) + "...");
-    const googleCallbackURL = process.env.GOOGLE_CALLBACK_URL || "http://localhost:3000/auth/google/callback";
-    console.log("Google Auth Callback URL set to:", googleCallbackURL);
-
-    passport.use(new GoogleStrategy({
-        clientID: process.env.GOOGLE_CLIENT_ID,
-        clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-        callbackURL: googleCallbackURL
-    },
-        function (accessToken, refreshToken, profile, cb) {
-            console.log("Google Auth Callback received for:", profile.displayName);
-            try {
-                // Check if user exists
-                let user = db.prepare('SELECT * FROM users WHERE provider = ? AND provider_id = ?').get('google', profile.id);
-
-                if (!user) {
-                    console.log("Creating new user for:", profile.displayName);
-                    // Create user
-                    const email = (profile.emails && profile.emails.length > 0) ? profile.emails[0].value : null;
-                    const insert = db.prepare('INSERT INTO users (provider, provider_id, email, nickname) VALUES (?, ?, ?, ?)');
-                    const info = insert.run('google', profile.id, email, profile.displayName);
-                    user = { id: info.lastInsertRowid, provider: 'google', provider_id: profile.id, email: email, nickname: profile.displayName };
-                } else {
-                    console.log("Existing user found:", user.nickname);
-                }
-                return cb(null, user);
-            } catch (err) {
-                console.error("Error in Google Auth Callback:", err);
-                return cb(err);
+passport.use(new GoogleStrategy({
+    clientID: process.env.GOOGLE_CLIENT_ID,
+    clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+    callbackURL: process.env.GOOGLE_CALLBACK_URL || "/auth/google/callback"
+},
+    async (accessToken, refreshToken, profile, done) => {
+        try {
+            let user = await User.findOne({ googleId: profile.id });
+            if (!user) {
+                user = await User.create({
+                    googleId: profile.id,
+                    email: (profile.emails && profile.emails.length > 0) ? profile.emails[0].value : null,
+                    nickname: profile.displayName
+                });
+                console.log(`[AUTH] New User Created: ${user.nickname}`);
+            } else {
+                // Optional: Update nickname
             }
+            return done(null, user);
+        } catch (err) {
+            return done(err, null);
         }
-    ));
-} else {
-    console.warn("GOOGLE_CLIENT_ID not found in .env. Google Auth will strictly fail.");
-}
+    }));
 
+// --- Helper Functions ---
 
-
-// --- Helper: Dynamic Pricing ---
-// --- Helper: Dynamic Pricing ---
-function getPixelPrice(x, y) {
-    // Center based on WORLD_SIZE 20000 -> Center 10000
-    const minCenter = 8000;
-    const maxCenter = 12000;
-    const minMid = 4000;
-    const maxMid = 16000;
-
-    if (x >= minCenter && x < maxCenter && y >= minCenter && y < maxCenter) {
-        return 2000;
+function parseColor(colorStr) {
+    let r = 0, g = 0, b = 0;
+    if (!colorStr) return { r, g, b };
+    if (colorStr.startsWith('#') && colorStr.length === 7) {
+        r = parseInt(colorStr.substring(1, 3), 16) || 0;
+        g = parseInt(colorStr.substring(3, 5), 16) || 0;
+        b = parseInt(colorStr.substring(5, 7), 16) || 0;
     }
-    if (x >= minMid && x < maxMid && y >= minMid && y < maxMid) {
-        return 1000;
-    }
-    // All other areas: 500 KRW
-    return 500;
+    return { r, g, b };
 }
 
 // --- Routes ---
 
-// --- Auth Token Table (Session Recovery) ---
-db.exec(`
-    CREATE TABLE IF NOT EXISTS auth_tokens (
-        token TEXT PRIMARY KEY,
-        user_id INTEGER,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        expires_at DATETIME
-    )
-`);
-
-// --- Helper: Generate Token ---
-function generateToken() {
-    return Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
-}
-
-// --- Routes ---
-
-app.get('/', (req, res) => {
-    // Session Recovery Logic
+app.get('/', async (req, res) => {
+    // Session Recovery
     const recoveryToken = req.query.restore_session;
     if (recoveryToken && !req.isAuthenticated()) {
-        console.log(`[AUTH] Attempting session recovery with token: ${recoveryToken}`);
         try {
-            const tokenParams = db.prepare('SELECT * FROM auth_tokens WHERE token = ?').get(recoveryToken);
-
-            if (tokenParams) {
-                const now = new Date();
-                const expiry = new Date(tokenParams.expires_at);
-
-                if (now < expiry) {
-                    const user = db.prepare('SELECT * FROM users WHERE id = ?').get(tokenParams.user_id);
-                    if (user) {
-                        req.login(user, (err) => {
-                            if (err) {
-                                console.error("[AUTH] Login error during recovery:", err);
-                            } else {
-                                console.log(`[AUTH] Session recovered for user: ${user.nickname}`);
-                                // Consume token (One-time use)
-                                db.prepare('DELETE FROM auth_tokens WHERE token = ?').run(recoveryToken);
-                            }
-                        });
-                    }
+            const tokenDoc = await AuthToken.findOne({ token: recoveryToken }).populate('userId');
+            if (tokenDoc) {
+                if (tokenDoc.expiresAt > new Date()) {
+                    req.login(tokenDoc.userId, async (err) => {
+                        if (!err) {
+                            console.log(`[AUTH] Session recovered for: ${tokenDoc.userId.nickname}`);
+                            await AuthToken.deleteOne({ _id: tokenDoc._id }); // Consume
+                        }
+                    });
                 } else {
-                    console.log("[AUTH] Recovery token expired");
-                    db.prepare('DELETE FROM auth_tokens WHERE token = ?').run(recoveryToken); // Cleanup
+                    await AuthToken.deleteOne({ _id: tokenDoc._id }); // Cleanup
                 }
-            } else {
-                console.log("[AUTH] Invalid recovery token");
             }
         } catch (e) {
-            console.error("[AUTH] Recovery error:", e);
+            console.error("[AUTH] Recovery Error:", e);
         }
     }
-
-    // Clean URL if token present (Optional, but good for UX)
-    // Client-side can also do history.replaceState
-
     res.sendFile(__dirname + '/index.html');
 });
 
-// NEW: Generate Recovery Token Endpoint
-app.post('/api/auth/recovery-token', (req, res) => {
-    if (!req.isAuthenticated()) {
-        return res.status(401).json({ error: 'Not authenticated' });
-    }
-
+// Generate Recovery Token
+app.post('/api/auth/recovery-token', async (req, res) => {
+    if (!req.isAuthenticated()) return res.status(401).json({ error: 'Not authenticated' });
     try {
-        const token = generateToken();
-        const userId = req.user.id;
-        const now = new Date();
-        const expiresAt = new Date(now.getTime() + 10 * 60000); // 10 minutes from now
-
-        db.prepare('INSERT INTO auth_tokens (token, user_id, expires_at) VALUES (?, ?, ?)').run(token, userId, expiresAt.toISOString());
-
-        console.log(`[AUTH] Generated recovery token for user ${userId}: ${token}`);
-        res.json({ token: token });
+        const token = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+        await AuthToken.create({
+            token: token,
+            userId: req.user._id,
+            expiresAt: new Date(Date.now() + 10 * 60000) // 10 mins
+        });
+        res.json({ token });
     } catch (e) {
-        console.error("Token generation failed:", e);
-        res.status(500).json({ error: 'Internal Server Error' });
+        res.status(500).json({ error: 'Token gen failed' });
     }
 });
 
-// Auth Routes
-app.get('/auth/google', passport.authenticate('google', { scope: ['profile', 'email'] }));
-
-app.get('/auth/google/callback',
-    passport.authenticate('google', { failureRedirect: '/' }),
-    function (req, res) {
-        // Successful authentication, redirect home.
-        res.redirect('/');
-    });
-
-app.get('/auth/logout', (req, res, next) => {
-    req.logout((err) => {
-        if (err) { return next(err); }
-        res.redirect('/');
-    });
-});
-
-app.get('/api/me', (req, res) => {
-    if (req.isAuthenticated()) {
-        res.json(req.user);
-    } else {
-        res.status(401).json({ message: 'Not authenticated' });
-    }
-});
-
-
-
-// API Routes
-
-// NEW: Payment Configuration Endpoint
-app.get('/api/config/payment', (req, res) => {
-    // Return public keys only. NEVER return API Secret here.
-    res.json({
-        storeId: process.env.PORTONE_STORE_ID,
-        channelKey: process.env.PORTONE_CHANNEL_KEY, // Default (KRW - Inicis)
-        channelKeyGlobal: process.env.PORTONE_CHANNEL_KEY_GLOBAL, // Global (USD - PayPal)
-        paymentIdPrefix: process.env.PAYMENT_ID_PREFIX || 'prod-'
-    });
-});
-
-
-// NEW: History API (Moved here to be after middleware)
-app.get('/api/history', (req, res) => {
-    if (!req.isAuthenticated()) { // Now safe
-        return res.status(401).json({ message: 'Not authenticated' });
-    }
-    const nickname = req.user.nickname;
+// History API
+app.get('/api/history', async (req, res) => {
+    if (!req.isAuthenticated()) return res.status(401).json({ message: 'Not authenticated' });
     try {
-        // Aggregated History (Group by Purchase Time within 1 second window)
-        // Note: We group by purchased_at which we set identical for batches.
-        const stmt = db.prepare(`
-            SELECT 
-                idol_group_name, 
-                purchased_at, 
-                expires_at, 
-                COUNT(*) as count 
-            FROM pixels 
-            WHERE owner_nickname = ? 
-            GROUP BY purchased_at, idol_group_name
-            ORDER BY purchased_at DESC 
-            LIMIT 20
-        `);
-        const rows = stmt.all(nickname);
-        console.log("[DEBUG] /api/history returns:", rows);
-        res.json(rows);
+        const history = await Pixel.aggregate([
+            { $match: { owner_nickname: req.user.nickname } },
+            {
+                $group: {
+                    _id: "$purchased_at",
+                    idol_group_name: { $first: "$idol_group_name" },
+                    expires_at: { $first: "$expires_at" },
+                    count: { $sum: 1 },
+                    purchased_at: { $first: "$purchased_at" }
+                }
+            },
+            { $sort: { purchased_at: -1 } },
+            { $limit: 20 }
+        ]);
+        res.json(history);
     } catch (err) {
-        console.error("Error fetching history:", err);
+        console.error("History Error:", err);
         res.status(500).send(err.message);
     }
 });
 
-// NEW: Chunk Loading API
-app.get('/api/pixels/chunk', (req, res) => {
+// Chunk API
+app.get('/api/pixels/chunk', async (req, res) => {
     let { minX, minY, maxX, maxY } = req.query;
+    if (minX === undefined) return res.status(400).json({ error: 'Missing bounds' });
 
-    // Validate inputs
-    if (minX === undefined || minY === undefined || maxX === undefined || maxY === undefined) {
-        return res.status(400).json({ error: 'Missing bounds parameters (minX, minY, maxX, maxY)' });
-    }
-
-    minX = Number(minX);
-    minY = Number(minY);
-    maxX = Number(maxX);
-    maxY = Number(maxY);
+    minX = Number(minX); minY = Number(minY); maxX = Number(maxX); maxY = Number(maxY);
 
     try {
-        // Optimized range query using INDEX
-        const stmt = db.prepare('SELECT * FROM pixels WHERE x >= ? AND x < ? AND y >= ? AND y < ?');
-        const rows = stmt.all(minX, maxX, minY, maxY);
+        const pixels = await Pixel.find({
+            x: { $gte: minX, $lt: maxX },
+            y: { $gte: minY, $lt: maxY },
+            color: { $ne: null }
+        }).lean();
 
-        // Cache for 10 seconds
         res.set('Cache-Control', 'public, max-age=10');
 
-        if (req.query.format === 'json') {
-            return res.json(rows);
-        }
-
-        // ALWAYS send binary for this optimized endpoint
-        // Binary Schema: [x(2)][y(2)][r(1)][g(1)][b(1)][group_len(1)][group_bytes...][owner_len(1)][owner_bytes...]
         const buffers = [];
-        for (const p of rows) {
-            // Parse Color (#RRGGBB)
-            let r = 0, g = 0, b = 0;
-            if (p.color && p.color.startsWith('#') && p.color.length === 7) {
-                r = parseInt(p.color.substring(1, 3), 16) || 0;
-                g = parseInt(p.color.substring(3, 5), 16) || 0;
-                b = parseInt(p.color.substring(5, 7), 16) || 0;
-            }
-
-            // Clamp strings to 255 bytes
+        for (const p of pixels) {
+            const { r, g, b } = parseColor(p.color);
             let groupBuf = Buffer.from(p.idol_group_name || '');
             if (groupBuf.length > 255) groupBuf = groupBuf.subarray(0, 255);
-
             let ownerBuf = Buffer.from(p.owner_nickname || '');
             if (ownerBuf.length > 255) ownerBuf = ownerBuf.subarray(0, 255);
 
@@ -512,229 +247,146 @@ app.get('/api/pixels/chunk', (req, res) => {
             buf.writeUInt8(r, offset); offset += 1;
             buf.writeUInt8(g, offset); offset += 1;
             buf.writeUInt8(b, offset); offset += 1;
-
             buf.writeUInt8(groupBuf.length, offset); offset += 1;
-            if (groupBuf.length > 0) {
-                groupBuf.copy(buf, offset); offset += groupBuf.length;
-            }
-
+            if (groupBuf.length > 0) { groupBuf.copy(buf, offset); offset += groupBuf.length; }
             buf.writeUInt8(ownerBuf.length, offset); offset += 1;
-            if (ownerBuf.length > 0) {
-                ownerBuf.copy(buf, offset); offset += ownerBuf.length;
-            }
+            if (ownerBuf.length > 0) { ownerBuf.copy(buf, offset); offset += ownerBuf.length; }
             buffers.push(buf);
         }
-        const finalBuf = Buffer.concat(buffers);
-        // console.log(`[DEBUG] /api/pixels/chunk: ${rows.length} pixels, Buffer len: ${finalBuf.length}`);
         res.set('Content-Type', 'application/octet-stream');
-        res.send(finalBuf);
+        res.send(Buffer.concat(buffers));
+
+    } catch (e) {
+        res.status(500).send(e.message);
+    }
+});
+
+// Config API
+app.get('/api/config/payment', (req, res) => {
+    res.json({
+        storeId: process.env.PORTONE_STORE_ID,
+        channelKey: process.env.PORTONE_CHANNEL_KEY,
+        channelKeyGlobal: process.env.PORTONE_CHANNEL_KEY_GLOBAL,
+        paymentIdPrefix: process.env.PAYMENT_ID_PREFIX || 'prod-'
+    });
+});
+
+app.get('/auth/google', passport.authenticate('google', { scope: ['profile', 'email'] }));
+app.get('/auth/google/callback', passport.authenticate('google', { failureRedirect: '/' }), (req, res) => res.redirect('/'));
+app.get('/auth/logout', (req, res, next) => {
+    req.logout((err) => { if (err) return next(err); res.redirect('/'); });
+});
+app.get('/api/me', (req, res) => {
+    req.isAuthenticated() ? res.json(req.user) : res.status(401).json({ message: 'Not authenticated' });
+});
+
+// Ranking API
+app.get('/api/ranking', async (req, res) => {
+    try {
+        const ranking = await Pixel.aggregate([
+            { $match: { idol_group_name: { $ne: null } } },
+            { $group: { _id: "$idol_group_name", count: { $sum: 1 } } },
+            { $project: { name: "$_id", count: 1, _id: 0 } },
+            { $sort: { count: -1 } },
+            { $limit: 10 }
+        ]);
+        res.json(ranking);
     } catch (err) {
-        console.error("Error fetching chunk:", err);
         res.status(500).send(err.message);
     }
 });
 
-// NEW: Tile Map Service (TMS) Endpoint
-// Generates a 256x256 PNG for a given grid coordinate (x, y)
+// Tile Map API
 const { PNG } = require('pngjs');
-
-// Map Constants needed for Tile Calculation
-// Server doesn't need to know exact world size if it just queries by range, but for tiles we need consistent grid.
-// Tile Size = 256px
-// Grid Scale = 20 (Actual pixels per coordinate point? No, DB stores x,y. 1 DB unit = 20px visualization? No. 
-// "GRID_SIZE = 20" in main.js means visuals are 20x20. But DB x,y are arbitrary integers? 
-// Let's assume DB x,y correlates to canvas pixels 1:1, but rendered as blocks.
-// User said: "pixels are not appearing". 
-// In main.js: const chunkMinX = cx * this.chunkSize;
-// Data Schema: x, y are INTEGERS.
-// Let's assume 1 Tile = 256x256 DB units.
-// NEW: Tile Map Service (TMS) Endpoint with LOD
-app.get('/api/pixels/tile', (req, res) => {
+app.get('/api/pixels/tile', async (req, res) => {
     const tx = parseInt(req.query.x);
     const ty = parseInt(req.query.y);
-    const zoom = parseInt(req.query.zoom) || 1; // 1 = 1:1, 2 = 2:1 (512px -> 256px), etc.
-
-    // Standard Tile Size
+    const zoom = parseInt(req.query.zoom) || 1;
     const TILE_SIZE = 256;
-
-    // Effective World Area Covered by this Tile
-    // At zoom=1, covers 256x256 world pixels
-    // At zoom=2, covers 512x512 world pixels (scaled down)
-    // At zoom=16, covers 4096x4096 world pixels
     const EFFECTIVE_SIZE = TILE_SIZE * zoom;
-
-    // Calculate world bounds
     const minX = tx * EFFECTIVE_SIZE;
     const minY = ty * EFFECTIVE_SIZE;
     const maxX = minX + EFFECTIVE_SIZE;
     const maxY = minY + EFFECTIVE_SIZE;
 
     try {
-        // Fetch pixels in this LARGE area
-        // Use Index to be fast (still fast because sparse data)
-        const stmt = db.prepare(`SELECT x, y, color FROM pixels WHERE x >= ? AND x < ? AND y >= ? AND y < ?`);
-        const rows = stmt.all(minX, maxX, minY, maxY);
+        const pixels = await Pixel.find({
+            x: { $gte: minX, $lt: maxX },
+            y: { $gte: minY, $lt: maxY },
+            color: { $ne: null }
+        }).lean();
 
-        // Create PNG (Always 256x256)
         const png = new PNG({ width: TILE_SIZE, height: TILE_SIZE });
-
-        // Fill background (Transparent)
-
-        // Draw Pixels with Scaling
-        for (const p of rows) {
-            // Calculate position relative to the large area
+        for (const p of pixels) {
             const lx = p.x - minX;
-            const ly = p.y - minY; // Removed local variable redeclaration
-
-            // Scale down to 256x256
-            // e.g. lx=100, zoom=2 -> targetX = 50
+            const ly = p.y - minY;
             const targetX = Math.floor(lx / zoom);
             const targetY = Math.floor(ly / zoom);
-
             if (targetX < 0 || targetX >= TILE_SIZE || targetY < 0 || targetY >= TILE_SIZE) continue;
-
-            let r = 0, g = 0, b = 0;
-            if (p.color && p.color.startsWith('#') && p.color.length === 7) {
-                r = parseInt(p.color.substring(1, 3), 16) || 0;
-                g = parseInt(p.color.substring(3, 5), 16) || 0;
-                b = parseInt(p.color.substring(5, 7), 16) || 0;
-            }
-
+            const { r, g, b } = parseColor(p.color);
             const idx = (targetY * TILE_SIZE + targetX) << 2;
-
-            // Simple Draw (Overwrite) - Ideally could blend or take average for LOD
-            // But for pixel art, sampling/overwrite is acceptable for speed
             png.data[idx] = r;
             png.data[idx + 1] = g;
             png.data[idx + 2] = b;
-            png.data[idx + 3] = 255; // Alpha
+            png.data[idx + 3] = 255;
         }
-
-        res.setHeader('Content-Type', 'image/png');
-        res.setHeader('Cache-Control', 'public, max-age=60');
+        res.set('Content-Type', 'image/png');
+        res.set('Cache-Control', 'public, max-age=60');
         png.pack().pipe(res);
-
     } catch (err) {
-        console.error("Error generating tile:", err);
         res.status(500).send("Tile Error");
     }
 });
 
-// NEW: Ranking API (Server-side Aggregation)
-app.get('/api/ranking', (req, res) => {
-    try {
-        const stmt = db.prepare(`
-            SELECT idol_group_name as name, COUNT(*) as count 
-            FROM pixels 
-            WHERE idol_group_name IS NOT NULL 
-            GROUP BY idol_group_name 
-            ORDER BY count DESC 
-            LIMIT 10
-        `);
-        const rows = stmt.all();
-        res.json(rows);
-    } catch (err) {
-        console.error("Error fetching ranking:", err);
-        res.status(500).send(err.message);
-    }
-});
-
-// Legacy Endpoint (Deprecated for large scale, but kept for compatibility/initial debug)
-app.get('/api/pixels', (req, res) => {
-    try {
-        // console.warn("WARNING: /api/pixels called. This is slow for large datasets.");
-        const stmt = db.prepare('SELECT * FROM pixels');
-        const rows = stmt.all();
-        res.json(rows);
-    } catch (err) {
-        res.status(500).send(err.message);
-    }
-});
+// --- Socket.io ---
 
 io.on('connection', (socket) => {
-    console.log('a user connected');
-    socket.on('disconnect', () => {
-        console.log('user disconnected');
-    });
-    socket.onAny((event, ...args) => {
-        console.log(`[DEBUG] Incoming Event: ${event}`, args);
-    });
+    console.log('User connected:', socket.id);
 
-    socket.on('new_pixel', (data) => {
-        console.log('[DEBUG] Received new_pixel:', data);
+    socket.on('purchase_pixels', async (data) => {
+        if (!data || !data.pixels || !Array.isArray(data.pixels)) return;
+
+        const pixels = data.pixels;
+        const now = new Date();
+        const expiresAt = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000); // 30 days
+
         try {
-            // Use consistent timestamp for the entire batch to allow grouping in history
-            const now = new Date();
-            const nowStr = now.toISOString(); // UTC ISO String
-
-            // Dynamic Season End (Quarterly: Mar, Jun, Sep, Dec)
-            const year = now.getFullYear();
-            const month = now.getMonth();
-            const endMonth = (Math.floor(month / 3) * 3) + 2;
-            const expiry = new Date(year, endMonth + 1, 0, 23, 59, 59, 999);
-            const expiryStr = expiry.toISOString();
-
-            const stmt = db.prepare(`INSERT INTO pixels (x, y, color, idol_group_name, owner_nickname, purchased_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)`);
-            const info = stmt.run(data.x, data.y, data.color, data.idol_group_name, data.owner_nickname, nowStr, expiryStr);
-            console.log('[DEBUG] Insert Success, ID:', info.lastInsertRowid);
-            io.emit('pixel_update', {
-                id: info.lastInsertRowid,
-                x: data.x,
-                y: data.y,
-                color: data.color,
-                idol_group_name: data.idol_group_name,
-                owner_nickname: data.owner_nickname
-            });
-        } catch (err) {
-            console.error('[DEBUG] INSERT ERROR:', err.message);
-        }
-    });
-
-    // BATCH UPDATE HANDLER
-    socket.on('batch_new_pixels', (pixels) => {
-        console.log(`[SERVER] Received batch_new_pixels event with ${pixels ? pixels.length : 'undefined'} pixels`);
-        try {
-            // Use consistent timestamp for the entire batch to allow grouping in history
-            const now = new Date();
-            const nowStr = now.toISOString(); // UTC ISO String
-
-            // Dynamic Season End (Quarterly: Mar, Jun, Sep, Dec)
-            const year = now.getFullYear();
-            const month = now.getMonth();
-            const endMonth = (Math.floor(month / 3) * 3) + 2;
-            const expiry = new Date(year, endMonth + 1, 0, 23, 59, 59, 999);
-            const expiryStr = expiry.toISOString();
-
-            const insert = db.prepare(`INSERT INTO pixels (x, y, color, idol_group_name, owner_nickname, purchased_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)`);
-            const insertMany = db.transaction((pixels) => {
-                const updates = [];
-                for (const p of pixels) {
-                    const info = insert.run(p.x, p.y, p.color, p.idol_group_name, p.owner_nickname, nowStr, expiryStr);
-                    updates.push({
-                        id: info.lastInsertRowid,
-                        x: p.x,
-                        y: p.y,
-                        color: p.color,
-                        idol_group_name: p.idol_group_name,
-                        owner_nickname: p.owner_nickname
-                    });
+            const bulkOps = pixels.map(p => ({
+                updateOne: {
+                    filter: { x: p.x, y: p.y },
+                    update: {
+                        $set: {
+                            color: data.idolColor || '#000000',
+                            idol_group_name: data.idolGroupName,
+                            owner_nickname: data.nickname,
+                            purchased_at: now,
+                            expires_at: expiresAt
+                        }
+                    },
+                    upsert: true
                 }
-                return updates;
-            });
+            }));
+            await Pixel.bulkWrite(bulkOps);
 
-            if (pixels && pixels.length > 0) {
-                const updates = insertMany(pixels);
-                console.log('[DEBUG] Batch Insert Success, Count:', updates.length);
-                // Broadcast all updates in one message
-                io.emit('batch_pixel_update', updates);
-            }
-        } catch (err) {
-            console.error('[DEBUG] BATCH INSERT ERROR:', err.message);
+            const updates = pixels.map(p => ({
+                x: p.x,
+                y: p.y,
+                color: data.idolColor,
+                idolGroupName: data.idolGroupName,
+                ownerNickname: data.nickname
+            }));
+
+            io.emit('pixel_update', updates);
+
+        } catch (e) {
+            console.error("Purchase Error:", e);
         }
     });
 
+    socket.on('disconnect', () => {
+    });
 });
 
 server.listen(port, () => {
-    console.log(`Server listening at http://localhost:${port}`);
+    console.log(`Server running on port ${port} (MongoDB)`);
 });
