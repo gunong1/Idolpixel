@@ -2025,9 +2025,9 @@ subscribeButton.onclick = async () => {
 
             console.log(`[PAYMENT] Mode: USD(PayPal V1), Amount: ${finalAmount}`);
 
-            // Initialize V1 SDK (User Code: imp61605332)
+            // Initialize V1 SDK (User Code: imp02261832 [CORRECT])
             const IMP = window.IMP;
-            IMP.init("imp61605332");
+            IMP.init("imp02261832");
 
             // Wrap V1 callback in a Promise to return a response structure compatible with V2 logic
             response = await new Promise((resolve) => {
@@ -2039,6 +2039,7 @@ subscribeButton.onclick = async () => {
                     amount: finalAmount,
                     currency: "USD",
                     m_redirect_url: window.location.href, // Mobile Redirection
+                    // buyer_email: "buyer@email.com", // Optional, omitted to keep it clean
                 }, function (rsp) {
                     if (rsp.success) {
                         console.log("[PAYMENT] V1 Success:", rsp);
