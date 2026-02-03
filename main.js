@@ -254,20 +254,18 @@ function checkUrlParams() {
             }
 
             // Verify with Server
-            // If V2 (paymentId) vs V1 (imp_uid)
+            // paymentId from URL is the PortOne Transaction ID (V2)
+            // state.paymentId is the MerchantUID we saved
+
             const verifyPayload = {
-                paymentId: paymentId || state.paymentId, // Use URL param or State ID
+                paymentId: state.paymentId, // Send MerchantUID
+                txId: paymentId,            // Send PortOne ID (from URL) as txId
                 imp_uid: impUid,
                 pixels: state.pixelsToSend,
                 idolGroupName: state.idolGroupName,
                 nickname: state.nickname,
                 idolColor: state.baseColor
             };
-
-            // V2 Logic: Server expects 'purchase_pixels' socket event to Finalize? 
-            // OR REST API verification?
-            // The User requested specific backend verification logic.
-            // Let's call a verification API first.
 
             fetch('/api/verify-payment', {
                 method: 'POST',
@@ -284,17 +282,24 @@ function checkUrlParams() {
                             idolColor: state.baseColor,
                             idolGroupName: state.idolGroupName,
                             nickname: state.nickname,
-                            paymentId: paymentId || state.paymentId // Send correct ID
+                            paymentId: state.paymentId, // MerchantUID
+                            txId: paymentId || impUid   // Verification ID
                         });
                         localStorage.removeItem('pending_payment');
                         window.history.replaceState({}, document.title, window.location.pathname); // Clean URL
                     } else {
+                        // [FIX] Clear pending state on failure to break error loop
                         alert(`결제 검증 실패: ${result.message}`);
+                        localStorage.removeItem('pending_payment');
+                        window.history.replaceState({}, document.title, window.location.pathname);
                     }
                 })
                 .catch(err => {
                     console.error("Verification Error:", err);
                     alert("결제 확인 중 오류가 발생했습니다.");
+                    // Optional: remove here too? Or let user retry? 
+                    // To be safe against loops:
+                    localStorage.removeItem('pending_payment');
                 });
         }
     }
