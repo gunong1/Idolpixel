@@ -150,7 +150,15 @@ function parseColor(colorStr) {
 
 // --- Routes ---
 
+// History API
+
+// [FIX] Force No-Cache for index.html to ensure version updates apply immediately
 app.get('/', async (req, res) => {
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.set('Pragma', 'no-cache');
+    res.set('Expires', '0');
+    res.set('Surrogate-Control', 'no-store');
+
     // Session Recovery
     const recoveryToken = req.query.restore_session;
     if (recoveryToken && !req.isAuthenticated()) {
