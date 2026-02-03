@@ -1836,12 +1836,20 @@ async function checkPendingPayment() {
         return;
     }
 
+    // [FIX] Stale Data Check (Expire after 10 minutes)
     try {
         const paymentState = JSON.parse(pendingData);
+        // Safety: If no timestamp, or older than 10 mins, discard
+        if (!paymentState.timestamp || (Date.now() - paymentState.timestamp > 10 * 60 * 1000)) {
+            console.log("[Payment Recovery] Found stale/expired pending state. Clearing.");
+            localStorage.removeItem('pending_payment');
+            return;
+        }
 
         // CRITICAL: Check for PortOne V2 response params in URL
         // Only proceed if we have actual payment success indicators
         const urlParams = new URLSearchParams(window.location.search);
+
         const urlPaymentId = urlParams.get('paymentId');
         const impSuccess = urlParams.get('imp_success'); // PortOne V1 legacy
         const code = urlParams.get('code');
@@ -3262,6 +3270,8 @@ if (typeof socket !== 'undefined') {
         // Display alert only for explicit error messages relevant to user
         if (err && err.message) {
             alert(`[오류] 서버: ${err.message}`);
+            // [FIX] Clear pending state on error to prevent infinite loops on reload
+            localStorage.removeItem('pending_payment');
         }
     });
 } else {
