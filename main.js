@@ -1848,10 +1848,13 @@ async function checkPendingPayment() {
         const message = urlParams.get('message');
 
         // STRICT VALIDATION: Require URL confirmation of payment
-        // If user pressed back button, there will be NO URL params
-        if (!urlPaymentId && !impSuccess) {
-            console.log("[Payment Recovery] No payment confirmation in URL. User likely cancelled or navigated back.");
-            console.log("[Payment Recovery] Clearing pending state to prevent false positive.");
+        // V2: paymentId (PortOne ID), txId, code, message
+        // V1: imp_uid, merchant_uid, imp_success
+        const verificationId = urlParams.get('txId') || urlParams.get('paymentId') || urlParams.get('imp_uid');
+        const isV1Success = urlParams.get('imp_success') === 'true';
+
+        if (!verificationId && !isV1Success) {
+            console.log("[Payment Recovery] No valid payment ID in URL. Clearing state.");
             localStorage.removeItem('pending_payment');
             return;
         }
@@ -1859,32 +1862,24 @@ async function checkPendingPayment() {
         // Check for error indicators in URL
         if (code != null) {
             // It's a response (either success or fail)
-            if (code !== '0' && code !== undefined) {
-                // If message exists, it might be an error.
-                if (paramsHaveError(urlParams)) {
-                    console.error("[Payment Recovery] Payment likely failed:", message);
-                    alert(`결제 실패 (이동 후): ${message || 'Unknown error'}`);
-                    localStorage.removeItem('pending_payment');
-                    return;
-                }
+            if (code !== '0' && code !== 'SUCCESS' && code !== undefined) {
+                console.error("[Payment Recovery] Payment likely failed:", message);
+                alert(`결제 실패 (이동 후): ${message || 'Unknown error'}`);
+                localStorage.removeItem('pending_payment');
+                return;
             }
         }
 
-
         // Logic: checking if this pending payment is relevant. 
-        // We assume valid because we clear it immediately after processing.
         console.log("[Payment Recovery] Found pending payment state:", paymentState);
 
         const { pixelsToSend, idolGroupName, nickname, baseColor, paymentId } = paymentState;
 
-        // Re-construct logic from success handler
         console.log(`[Payment Recovery] Restoring purchase for ${pixelsToSend.length} pixels...`);
 
         // Generate Pixels Payload
-        // Re-use color generation or saved color
         let color = baseColor;
         if (!color) {
-            // Fallback generation if not saved (backward compat)
             if (idolInfo[idolGroupName]) {
                 color = idolInfo[idolGroupName].color;
             } else {
@@ -1897,20 +1892,19 @@ async function checkPendingPayment() {
             }
         }
 
-        const pixelsPayload = pixelsToSend.map(p => ({
-            x: p.x,
-            y: p.y,
-            color: color,
-            idol_group_name: idolGroupName,
-            owner_nickname: nickname
-        }));
+        // [FIX] Use purchase_pixels event for proper Server Verification
+        // batch_new_pixels was bypassing verification or failing rights check
+        const purchaseData = {
+            pixels: pixelsToSend,
+            idolColor: color,
+            idolGroupName: idolGroupName,
+            nickname: nickname,
+            paymentId: paymentId, // Merchant UID from LocalStorage
+            txId: verificationId  // Verification ID (PortOne ID) from URL
+        };
 
-        // Batch Emit
-        const CHUNK_SIZE = 50000;
-        for (let i = 0; i < pixelsPayload.length; i += CHUNK_SIZE) {
-            const chunk = pixelsPayload.slice(i, i + CHUNK_SIZE);
-            socket.emit('batch_new_pixels', chunk);
-        }
+        console.log("[Payment Recovery] Emitting purchase_pixels with payload:", purchaseData);
+        socket.emit('purchase_pixels', purchaseData);
 
         alert('구매가 완료되었습니다! (모바일 복귀)');
 
