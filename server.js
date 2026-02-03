@@ -10,6 +10,9 @@ const MongoStore = require('connect-mongo').default;
 const app = express();
 app.set('trust proxy', 1);
 const compression = require('compression');
+const NodeCache = require('node-cache');
+const pixelCache = new NodeCache({ stdTTL: 600 }); // 10 minutes default (flushed on write)
+
 app.use(compression({ threshold: 0 })); // Compress ALL responses
 app.use('/locales', express.static(path.join(__dirname, 'locales')));
 app.use(express.static(__dirname));
@@ -320,12 +323,28 @@ app.post('/api/verify-payment', async (req, res) => {
 
 // Chunk API
 app.get('/api/pixels/chunk', async (req, res) => {
-    let { minX, minY, maxX, maxY } = req.query;
+    let { minX, minY, maxX, maxY, format } = req.query;
     if (minX === undefined) return res.status(400).json({ error: 'Missing bounds' });
 
     minX = Number(minX); minY = Number(minY); maxX = Number(maxX); maxY = Number(maxY);
 
+    // [CACHE] Check Memory Cache
+    const cacheKey = `chunk_${minX}_${minY}_${maxX}_${maxY}_${format || 'bin'}`;
+    const cachedData = pixelCache.get(cacheKey);
+    if (cachedData) {
+        // console.log(`[CACHE] HIT: ${cacheKey}`);
+        res.set('X-Cache', 'HIT');
+        res.set('Cache-Control', 'public, max-age=60');
+        if (format === 'json') return res.json(cachedData); // Return JSON object directly
+
+        res.set('Content-Type', 'application/octet-stream');
+        return res.send(cachedData); // Return Buffer directly
+    }
+
     try {
+        // console.log(`[CACHE] MISS: ${cacheKey} (DB Query)`);
+        res.set('X-Cache', 'MISS');
+
         const pixels = await Pixel.find({
             x: { $gte: minX, $lt: maxX },
             y: { $gte: minY, $lt: maxY },
@@ -334,13 +353,14 @@ app.get('/api/pixels/chunk', async (req, res) => {
             .select('x y color idol_group_name owner_nickname -_id') // Exclude _id, include needed fields
             .lean();
 
-        res.set('Cache-Control', 'public, max-age=10');
-
-        // [FIX] Support JSON format for main.js compatibility
-        if (req.query.format === 'json') {
+        // 1. JSON Format Support
+        if (format === 'json') {
+            pixelCache.set(cacheKey, pixels); // Cache the array
+            res.set('Cache-Control', 'public, max-age=60');
             return res.json(pixels);
         }
 
+        // 2. Binary Format (Default)
         const buffers = [];
         for (const p of pixels) {
             const { r, g, b } = parseColor(p.color);
@@ -362,10 +382,16 @@ app.get('/api/pixels/chunk', async (req, res) => {
             if (ownerBuf.length > 0) { ownerBuf.copy(buf, offset); offset += ownerBuf.length; }
             buffers.push(buf);
         }
+
+        const finalBuffer = Buffer.concat(buffers);
+        pixelCache.set(cacheKey, finalBuffer); // Cache the Buffer
+
         res.set('Content-Type', 'application/octet-stream');
-        res.send(Buffer.concat(buffers));
+        res.set('Cache-Control', 'public, max-age=60');
+        res.send(finalBuffer);
 
     } catch (e) {
+        console.error("Chunk Error:", e);
         res.status(500).send(e.message);
     }
 });
@@ -623,6 +649,10 @@ io.on('connection', (socket) => {
             console.log('[DEBUG] Executing bulkWrite...');
             const result = await Pixel.bulkWrite(bulkOps);
             console.log('[DEBUG] bulkWrite Result:', result);
+
+            // [CACHE] Invalidate All on Write (Ensure all clients get fresh data)
+            pixelCache.flushAll();
+            // console.log('[CACHE] Flushed all chunk cache due to purchase.');
 
             const updates = pixels.map(p => ({
                 x: p.x,
