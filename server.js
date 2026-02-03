@@ -328,35 +328,46 @@ app.get('/api/pixels/chunk', async (req, res) => {
 
     minX = Number(minX); minY = Number(minY); maxX = Number(maxX); maxY = Number(maxY);
 
+    const timerLabel = `chunk_${minX}_${minY}`;
+    console.time(timerLabel);
+
     // [CACHE] Check Memory Cache
     const cacheKey = `chunk_${minX}_${minY}_${maxX}_${maxY}_${format || 'bin'}`;
     const cachedData = pixelCache.get(cacheKey);
     if (cachedData) {
-        // console.log(`[CACHE] HIT: ${cacheKey}`);
+        console.log(`[CACHE] HIT: ${cacheKey}`);
         res.set('X-Cache', 'HIT');
         res.set('Cache-Control', 'public, max-age=60');
-        if (format === 'json') return res.json(cachedData); // Return JSON object directly
+        res.set('Server-Timing', 'cache;desc="Hit"');
+
+        if (format === 'json') {
+            console.timeEnd(timerLabel);
+            return res.json(cachedData);
+        }
 
         res.set('Content-Type', 'application/octet-stream');
-        return res.send(cachedData); // Return Buffer directly
+        console.timeEnd(timerLabel);
+        return res.send(cachedData);
     }
 
     try {
-        // console.log(`[CACHE] MISS: ${cacheKey} (DB Query)`);
+        console.log(`[CACHE] MISS: ${cacheKey} (DB Query)`);
         res.set('X-Cache', 'MISS');
+        res.set('Server-Timing', 'cache;desc="Miss"');
 
         const pixels = await Pixel.find({
             x: { $gte: minX, $lt: maxX },
             y: { $gte: minY, $lt: maxY },
             color: { $ne: null }
         })
-            .select('x y color idol_group_name owner_nickname -_id') // Exclude _id, include needed fields
+            .select('x y color idol_group_name owner_nickname -_id')
             .lean();
 
         // 1. JSON Format Support
         if (format === 'json') {
-            pixelCache.set(cacheKey, pixels); // Cache the array
+            pixelCache.set(cacheKey, pixels);
             res.set('Cache-Control', 'public, max-age=60');
+            console.timeEnd(timerLabel);
             return res.json(pixels);
         }
 
@@ -384,14 +395,17 @@ app.get('/api/pixels/chunk', async (req, res) => {
         }
 
         const finalBuffer = Buffer.concat(buffers);
-        pixelCache.set(cacheKey, finalBuffer); // Cache the Buffer
+        pixelCache.set(cacheKey, finalBuffer);
 
         res.set('Content-Type', 'application/octet-stream');
         res.set('Cache-Control', 'public, max-age=60');
+
+        console.timeEnd(timerLabel);
         res.send(finalBuffer);
 
     } catch (e) {
         console.error("Chunk Error:", e);
+        console.timeEnd(timerLabel);
         res.status(500).send(e.message);
     }
 });
